@@ -93,8 +93,10 @@ namespace MultiOpt {
     typedef tuple<bool,bool> IITup;
     typedef unordered_map<IITup,string> IITupStringMapT;
     typedef unordered_map<IITup, IITupStringMapT> FlipMapT;
-    typedef unordered_map<size_t, unordered_map<size_t,Derivation>> slnDictT;
 
+    typedef unordered_map< size_t, unordered_map<size_t, Derivation>> slnDictT;
+    //typedef unordered_map<size_t, vector<Derivation>> slnDictT;
+    //typedef Google<size_t, vector<Derivation>>::Map slnDictT;
     //typedef Google<size_t, Google<size_t,Derivation>::Map>::Map slnDictT;
 
     auto none = make_tuple(false,false); auto fw = make_tuple(true,false); auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
@@ -141,6 +143,7 @@ namespace MultiOpt {
         for ( auto l : t->getLeavesId() ){ leafSet.insert(l); }
         auto isLeaf = [&]( const int& nid ) { return leafSet.find(nid) != leafSet.end(); };//t->isLeaf(nid); };
         auto isInternal = [&]( const int& nid ) { return ! isLeaf(nid); };
+        auto isLost = [&]( int nid ){ return (t->getNodeName(nid)).find("LOST") != std::string::npos; };
 
         unique_ptr<ForwardHypergraph> slnSpaceGraph( new ForwardHypergraph() );
 
@@ -161,16 +164,26 @@ namespace MultiOpt {
                     auto noFlipLR = FlipKey( LRN, RRN, k.f(), k.r() );
                     // 2 -- we flip the self loop
                     auto dualFlipLL = flipBoth( noFlipLL ); auto dualFlipRR = flipBoth( noFlipRR ); auto dualFlipLR = flipBoth( noFlipLR );
+                    vector<FlipKey> noFlipEdge = vector<FlipKey>();
+                    vector<FlipKey> dualFlipEdge = vector<FlipKey>();
 
-                    vector<FlipKey> noFlipEdge = { noFlipLL, noFlipRR };
-                    vector<FlipKey> dualFlipEdge = { dualFlipLL, dualFlipRR };
-                    if (! differentExtantNetworks(ti, LRN, RRN) ) {
+                    if ( !isLost(LRN) ) {
+                        noFlipEdge.push_back( noFlipLL ); dualFlipEdge.push_back( dualFlipLL );
+                    }
+                    if ( !isLost(RRN) ) {
+                        noFlipEdge.push_back( noFlipRR ); dualFlipEdge.push_back( dualFlipRR );
+                    }
+
+
+                    //vector<FlipKey> noFlipEdge = { noFlipLL, noFlipRR };
+                    //vector<FlipKey> dualFlipEdge = { dualFlipLL, dualFlipRR };
+
+                    if (! differentExtantNetworks(ti, LRN, RRN) && ! (isLost(LRN) || isLost(RRN)) ) {
                         noFlipEdge.push_back( noFlipLR );
                         dualFlipEdge.push_back( dualFlipLR );
                     }
-
-                    slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
-                    slnSpaceGraph->addEdge( dualFlipEdge, k, 1.0 );
+                    if ( noFlipEdge.size() > 0 ) { slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 ); }
+                    if ( dualFlipEdge.size() > 0 ) { slnSpaceGraph->addEdge( dualFlipEdge, k, 1.0 ); }
                 }
             } else {
                 if ( isInternal(rnode) ) {
@@ -186,10 +199,10 @@ namespace MultiOpt {
 
                     vector<FlipKey> noFlip; vector<FlipKey> dualFlip;
 
-                    if ( !differentExtantNetworks(ti, LRN, onode) ){
+                    if ( !differentExtantNetworks(ti, LRN, onode) && !(isLost(LRN) || isLost(onode)) ){
                         noFlip.push_back( noFlipL ); dualFlip.push_back( dualFlipL );
                     }
-                    if ( !differentExtantNetworks(ti, RRN, onode) ){
+                    if ( !differentExtantNetworks(ti, RRN, onode) && !(isLost(RRN) || isLost(onode)) ){
                         noFlip.push_back( noFlipR ); dualFlip.push_back( dualFlipR );
                     }
 
@@ -247,7 +260,8 @@ namespace MultiOpt {
                 //cout << "u,v = " << u << ", " << v << "\n";
                 if ( (u == v) ||
                      (!differentExtantNetworks(ti,u,v) &&
-                      !(ti.inSubnodesOf(u,v) ||  ti.inSubnodesOf(v,u)) ) ) {
+                      !(ti.inSubnodesOf(u,v) ||  ti.inSubnodesOf(v,u)) &&
+                      !(isLost(u) || isLost(v))) ) {
                     //cout << "HERE\n";
                     slnSpaceGraph->addVertex( FlipKey( u, v, false, false ) );
                     if ( ! t->isRoot(v) ) {
@@ -424,7 +438,7 @@ namespace MultiOpt {
                 Google<Derivation::flipT>::Set es;
                 es.set_empty_key( make_tuple(-1,-1,""));
                 // set<tuple<int,int,string>> es;
-                slnDict[n] = { {0, Derivation(lostCost, n, ev, es)} };
+                slnDict[n] = { {0,Derivation(lostCost, n, ev, es)} };
             } else {
                 // Otherwise, u and v both exist in the extant
                 // network, so get the appropriate info
@@ -445,7 +459,8 @@ namespace MultiOpt {
                     //set< tuple<int,int,string> > effectiveEdges;
                     if ( flip != "n" ) { effectiveEdges.insert( make_tuple(nd.u(),nd.v(),flip) ); }
                     vector<size_t> ev;
-                    slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges) } };
+                    slnDict[n] = { {0,Derivation(cost, n, ev, effectiveEdges)} };
+
                 } else {
                     auto hasSelfLoop = hasEdge(u,v);
                     auto costFlip = selfLoopCostDict[ make_tuple(f,r) ][ hasSelfLoop ];
@@ -455,7 +470,8 @@ namespace MultiOpt {
                     //set< tuple<int,int,string> > effectiveEdges;
                     if ( flip != "n" ) { effectiveEdges.insert( make_tuple(nd.u(),nd.v(),flip) ); }
                     vector<size_t> ev;
-                    slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges) } };
+                    slnDict[n] = { {0,Derivation(cost, n, ev, effectiveEdges)} };
+
                 } // ( u != v )
             } // ( lostU || lostV )
         } // loop over leaf hypernodes
@@ -744,9 +760,11 @@ namespace MultiOpt {
             auto lastInd = 0;
             if ( d[v].size() > 0 ) {
                 // Get this derivation
-                lastInd = max_element( d[v].begin(), d[v].end(),
-                                       [] ( const TaggedDerivT& a, const TaggedDerivT& b ) { return a.first < b.first; } )->first;//max(d[v].keys())
+                auto lastInd = max_element( d[v].begin(), d[v].end(),
+                                            [] ( const TaggedDerivT& a, const TaggedDerivT& b ) { return a.first < b.first; } )->first;
                 auto deriv = d[v][lastInd];
+                //auto deriv = d[v].back();
+
                 // Update the heap adding the last derivation's
                 // successor
                 if ( recursedStore.find( make_tuple(v,lastInd) ) == recursedStore.end() ) {
@@ -779,16 +797,18 @@ namespace MultiOpt {
                 //cerr << "really done\n";
 
                 //cerr << "candidate is : " << deriv << "\n";
-
+                /*
                 auto lastInd = (max_element( d[v].begin(), d[v].end(),
                                              [] ( const TaggedDerivT& a, const TaggedDerivT& b ) { return a.first < b.first; } ))->first;
-
+                */
                 auto existingElem = find_if( d[v].begin(), d[v].end(), [&] ( const TaggedDerivT& od ) { return sameEffect(deriv,od.second); } );
                 auto found = (existingElem != d[v].end());
 
                 // Always add a derivation if none exist
                 if ( d[v].size() == 0 || ! found ) {
                     d[v][ d[v].size() ] = deriv;
+                    //d[v].push_back(deriv);
+
                 } else {
                     // If there is no derivation with this same score and set of effective flips, then add it
                     //cerr << "skipping solution " << deriv << "\n";

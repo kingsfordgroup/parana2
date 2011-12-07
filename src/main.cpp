@@ -15,6 +15,7 @@
 #include <boost/progress.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/scoped_ptr.hpp>
+#include <boost/lexical_cast.hpp>
 
 /** Local Includes */
 #include <arg_parser.hpp>
@@ -57,6 +58,7 @@ using boost::graph_traits;
 using boost::vecS;
 using boost::listS;
 using boost::variant;
+using boost::lexical_cast;
 using Utils::TreeInfo;
 
 const std::string getName(Tree* t, int nid) {
@@ -186,6 +188,7 @@ int main( int argc, char **argv ){
             MultiOpt::topologicalOrder( H, order );
 
             MultiOpt::slnDictT slnDict;
+            //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
             if ( undirected ) {
                 MultiOpt::leafCostDict( H, tree, get<undirectedGraphT>(G), directed, 1.0, 1.0, slnDict);
             } else {
@@ -203,13 +206,14 @@ int main( int argc, char **argv ){
             prevCost = newCost = slnDict[ rootInd ][ derivNum ].cost;
             MultiOpt::initKBest();
 
-            while ( derivNum < totalDerivs ) { // || prevCost == newCost ) {
+            while ( derivNum < totalDerivs || prevCost == newCost ) {
                 MultiOpt::lazyKthBest( H, slnDict, rootInd, derivNum, derivNum );
                 cerr << "returned from call to lazy" << derivNum << "best!!\n";
                 auto d = slnDict[ rootInd ][ derivNum ];
                 cout << "DERIVATION # " << derivNum << ": for [(" << tree->getNodeName(rootKey.u()) << ", " << tree->getNodeName(rootKey.v()) <<  ") : (" << rootKey.f() << rootKey.r() << ")] (" << d.cost << ")\n";
 
-                std::fstream output( "output.txt", std::fstream::in | std::fstream::out | std::fstream::app );
+                string fname = "outputDir/output.txt." + lexical_cast<string>(derivNum);
+                std::fstream output( fname, std::fstream::in | std::fstream::out | std::fstream::app );
                 for ( auto f : d.flips ) {
                     cout << " [ " << tree->getNodeName(get<0>(f)) << ", " << tree->getNodeName(get<1>(f)) << " : " << get<2>(f) <<  "]\n";
                     output << tree->getNodeName(get<0>(f)) << "\t" << tree->getNodeName(get<1>(f)) << "\t" << get<2>(f).substr(0,1) << "\n";
