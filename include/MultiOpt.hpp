@@ -62,8 +62,6 @@ namespace std {
 
 namespace MultiOpt {
 
-    using mct::closed_hash_set;
-    using mct::closed_hash_map;
     using google::dense_hash_set;
     using google::dense_hash_map;
     using google::sparse_hash_map;
