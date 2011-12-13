@@ -1,6 +1,7 @@
 #ifndef MULTI_OPT_HPP
 #define MULTI_OPT_HPP
 
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <tuple>
@@ -12,7 +13,15 @@
 #include <boost/assign/list_of.hpp>
 #include <boost/functional/hash.hpp>
 #include "Derivation.hpp"
+#include <cln/rational.h>
+#include <cln/integer.h>
+#include <cln/float.h>
+#include <cln/real.h>
+#include <cln/rational_io.h>
+#include <cln/integer_io.h>
+#include <cln/float_io.h>
 #include <limits>
+#include <sstream>
 
 /** Google's dense hash set and hash map **/
 #include <google/dense_hash_set>
@@ -62,6 +71,10 @@ namespace std {
 
 namespace MultiOpt {
 
+    using cln::cl_I;
+    using cln::cl_F;
+    using cln::cl_RA;
+    using cln::cl_float;
     using google::dense_hash_set;
     using google::dense_hash_map;
     using google::sparse_hash_map;
@@ -94,12 +107,26 @@ namespace MultiOpt {
     typedef unordered_map<IITup,string> IITupStringMapT;
     typedef unordered_map<IITup, IITupStringMapT> FlipMapT;
 
+    auto none = make_tuple(false,false); auto fw = make_tuple(true,false); auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+    static unordered_map<tuple<bool,bool>, string> flipStrMap = {
+        {none, "n"},
+        {fw, "f"},
+        {rev, "r"},
+        {both, "b"}
+    };
+
     typedef unordered_map< size_t, unordered_map<size_t, Derivation>> slnDictT;
+    typedef Google< size_t, cl_I >::Map countDictT;
     //typedef unordered_map<size_t, vector<Derivation>> slnDictT;
     //typedef Google<size_t, vector<Derivation>>::Map slnDictT;
     //typedef Google<size_t, Google<size_t,Derivation>::Map>::Map slnDictT;
 
-    auto none = make_tuple(false,false); auto fw = make_tuple(true,false); auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+    typedef tuple<bool,bool> flipTupleT;
+    typedef tuple<double, string> costRepT;
+    typedef unordered_map< flipTupleT, unordered_map<flipTupleT, costRepT> > costMapT;
+    typedef unordered_map< flipTupleT, unordered_map<bool, costRepT> > selfCostMapT;
+
 
     static FlipMapT flipDict = {
         {none, { {both, "b+"}, {fw, "f+"}, {rev, "r+"}, {none, "n"} } },
@@ -107,6 +134,55 @@ namespace MultiOpt {
         {rev,  { {both, "f+"}, {rev, "n"}, {none, "r-"}, {fw, "f+r-"} } },
         {both, { {both, "n"}, {fw, "r-"}, {rev, "f-"}, {none, "b-"} } }
     };
+
+    costMapT getCostDict ( double cc, double dc, bool directed ) {
+        auto undirected = ! directed;
+        auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
+        auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+        costMapT costDict;
+        costDict[ none ][ none ] = make_tuple( 0.0, "n" );
+        costDict[ none ][ fw ] = make_tuple( cc, "f+" );
+        costDict[ none ][ rev ] = make_tuple( cc, "r+" );
+        costDict[ none ][ both ] = make_tuple( undirected ? cc : 2*cc , "b+" );
+
+        costDict[ rev ][ none ] = make_tuple( dc, "r-" );
+        costDict[ rev ][ fw ] = make_tuple( cc+dc, "f+r-" );
+        costDict[ rev ][ rev ] = make_tuple( 0.0, "n" );
+        costDict[ rev ][ both ] = make_tuple( cc , "f+" );
+
+        costDict[ fw ][ none ] = make_tuple( dc, "f-" );
+        costDict[ fw ][ fw ] = make_tuple( 0.0, "n" );
+        costDict[ fw ][ rev ] = make_tuple( cc+dc, "f-r+" );
+        costDict[ fw ][ both ] = make_tuple( cc , "r+" );
+
+        costDict[ both ][ none ] = make_tuple( undirected ? dc : 2*dc, "b-" );
+        costDict[ both ][ fw ] = make_tuple( dc, "r-" );
+        costDict[ both ][ rev ] = make_tuple( dc, "f-" );
+        costDict[ both ][ both ] = make_tuple( 0.0, "n");
+
+        return costDict;
+    }
+
+    selfCostMapT getSelfLoopCostDict ( double cc, double dc, bool directed ) {
+        auto undirected = ! directed;
+        auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
+        auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+        selfCostMapT selfLoopCostDict;
+        selfLoopCostDict[ none ][ true ] = make_tuple( cc, "b+" );
+        selfLoopCostDict[ none ][ false ] = make_tuple( 0.0, "n" );
+
+        selfLoopCostDict[ rev ][ true ] = make_tuple( 0.0, "n" );
+        selfLoopCostDict[ rev ][ false ] = make_tuple( dc, "b-" );
+
+        selfLoopCostDict[ fw ][ true ] = make_tuple( 0.0, "n" );
+        selfLoopCostDict[ fw ][ false ] = make_tuple( dc, "b-" );
+
+        selfLoopCostDict[ both ][ true ] = make_tuple( 0.0, "n" );
+        selfLoopCostDict[ both ][ false ] = make_tuple( dc, "b-" );
+        return selfLoopCostDict;
+    }
 
     string flipType( const FlipKey& hvert, const FlipKey& tvert ){
         return flipDict[ make_tuple(hvert.f(), hvert.r())][ make_tuple(tvert.f(), tvert.r()) ];
@@ -137,7 +213,12 @@ namespace MultiOpt {
         boost::topological_sort(G, std::back_inserter(order));
     }
 
-    unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( const Tree* t, const TreeInfo& ti, bool directed ) {
+    unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( const Tree* t,
+                                                            const TreeInfo& ti,
+                                                            double cc,
+                                                            double dc,
+                                                            double penalty,
+                                                            bool directed ) {
         Google<int>::Set leafSet;
         leafSet.set_empty_key(-1);
         for ( auto l : t->getLeavesId() ){ leafSet.insert(l); }
@@ -147,7 +228,10 @@ namespace MultiOpt {
 
         unique_ptr<ForwardHypergraph> slnSpaceGraph( new ForwardHypergraph() );
 
-        auto addIncomingHyperedge = [=,&slnSpaceGraph] (const FlipKey& k, const int& rnode, const int& onode ) {
+        costMapT costMap( getCostDict(cc,dc,directed) );
+        selfCostMapT selfLoopCostMap( getSelfLoopCostDict(cc,dc,directed) );
+
+        auto addIncomingHyperedge = [=,&costMap,&selfLoopCostMap,&slnSpaceGraph] (const FlipKey& k, const int& rnode, const int& onode ) {
             auto dirKey = k.getDirTuple();
 
             // Self loop
@@ -183,13 +267,20 @@ namespace MultiOpt {
                         dualFlipEdge.push_back( dualFlipLR );
                     }
                     if ( noFlipEdge.size() > 0 ) { slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 ); }
-                    if ( dualFlipEdge.size() > 0 ) { slnSpaceGraph->addEdge( dualFlipEdge, k, 1.0 ); }
+                    if ( dualFlipEdge.size() > 0 ) {
+                        slnSpaceGraph->addEdge( dualFlipEdge, k,
+                                                get<0>(selfLoopCostMap[ make_tuple(k.f(), k.r()) ][ dualFlipLL.f() || dualFlipLL.r() ])  );
+                    }
                 }
             } else {
                 if ( isInternal(rnode) ) {
                     //cout << t->getNodeName(rnode) << " is INTERNAL\n";
                     // Get the children nodes
                     int LRN = t->getSonsId(rnode)[0]; int RRN = t->getSonsId(rnode)[1];
+
+                    double canonicalDerivCost = 0.0;
+                    // if ( rnode < onode ) { canonicalDerivCost = 1e-50; }
+
                     // This vertex has 2 incoming hyper edges
                     // 1 -- we don't flip the self-loop
                     auto noFlipL = FlipKey( LRN, onode, k.f(), k.r() );
@@ -207,10 +298,10 @@ namespace MultiOpt {
                     }
 
                     if ( noFlip.size() > 0 ) {
-                        slnSpaceGraph->addEdge( noFlip, k, 0.0 );
+                        slnSpaceGraph->addEdge( noFlip, k, canonicalDerivCost);//0.0 );
                     }
                     if ( dualFlip.size() > 0 ) {
-                        auto w = directed ? 2.0 : 1.0;//2.0 ? directed : 1.0;
+                        auto w = get<0>(costMap[ make_tuple(k.f(),k.r()) ][ make_tuple(dualFlipL.f(), dualFlipL.r()) ]);//directed ? 2.0 : 1.0;//2.0 ? directed : 1.0;
                         slnSpaceGraph->addEdge( dualFlip, k, w );
                     }
 
@@ -228,10 +319,12 @@ namespace MultiOpt {
                         }
 
                         if ( fwFlip.size() > 0 ) {
-                            slnSpaceGraph->addEdge( fwFlip, k , 1.0 );
+                            auto w = get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(fwFlipL.f(), fwFlipL.r()) ]);
+                            slnSpaceGraph->addEdge( fwFlip, k , w );
                         }
                         if ( revFlip.size() > 0 ) {
-                            slnSpaceGraph->addEdge( revFlip, k, 1.0 );
+                            auto w = get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(revFlipL.f(), revFlipL.r()) ]);
+                            slnSpaceGraph->addEdge( revFlip, k, w );
                         }
                     }
 
@@ -290,6 +383,7 @@ namespace MultiOpt {
             }
         }
         cerr << "\n";
+cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
         return slnSpaceGraph;
     }
 
@@ -304,47 +398,12 @@ namespace MultiOpt {
         */
         auto undirected = !directed;
         // Cost of going from the state encoded by a node to the state of a true graph edge
-        typedef tuple<bool,bool> flipTupleT;
-        typedef tuple<double, string> costRepT;
-        typedef unordered_map< flipTupleT, unordered_map<flipTupleT, costRepT> > costMapT;
-        typedef unordered_map< flipTupleT, unordered_map<bool, costRepT> > selfCostMapT;
 
         auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
         auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
 
-        costMapT costDict;
-        costDict[ none ][ none ] = make_tuple( 0.0, "n" );
-        costDict[ none ][ fw ] = make_tuple( cc, "f+" );
-        costDict[ none ][ rev ] = make_tuple( cc, "r+" );
-        costDict[ none ][ both ] = make_tuple( undirected ? cc : 2*cc , "b+" );
-
-        costDict[ rev ][ none ] = make_tuple( dc, "r-" );
-        costDict[ rev ][ fw ] = make_tuple( cc+dc, "f+r-" );
-        costDict[ rev ][ rev ] = make_tuple( 0.0, "n" );
-        costDict[ rev ][ both ] = make_tuple( cc , "f+" );
-
-        costDict[ fw ][ none ] = make_tuple( dc, "f-" );
-        costDict[ fw ][ fw ] = make_tuple( 0.0, "n" );
-        costDict[ fw ][ rev ] = make_tuple( cc+dc, "f-r+" );
-        costDict[ fw ][ both ] = make_tuple( cc , "r+" );
-
-        costDict[ both ][ none ] = make_tuple( undirected ? dc : 2*dc, "b-" );
-        costDict[ both ][ fw ] = make_tuple( dc, "r-" );
-        costDict[ both ][ rev ] = make_tuple( dc, "f-" );
-        costDict[ both ][ both ] = make_tuple( 0.0, "n");
-
-        selfCostMapT selfLoopCostDict;
-        selfLoopCostDict[ none ][ true ] = make_tuple( cc, "b+" );
-        selfLoopCostDict[ none ][ false ] = make_tuple( 0.0, "n" );
-
-        selfLoopCostDict[ rev ][ true ] = make_tuple( 0.0, "n" );
-        selfLoopCostDict[ rev ][ false ] = make_tuple( dc, "b-" );
-
-        selfLoopCostDict[ fw ][ true ] = make_tuple( 0.0, "n" );
-        selfLoopCostDict[ fw ][ false ] = make_tuple( dc, "b-" );
-
-        selfLoopCostDict[ both ][ true ] = make_tuple( 0.0, "n" );
-        selfLoopCostDict[ both ][ false ] = make_tuple( dc, "b-" );
+        auto costDict = getCostDict(cc,dc,directed);
+        auto selfLoopCostDict = getSelfLoopCostDict(cc,dc,directed);
 
         auto N = H->order();
         auto M = H->size();
@@ -477,8 +536,168 @@ namespace MultiOpt {
         } // loop over leaf hypernodes
     }
 
+    /**
+     *  Compute the penalty for this edge to exist based on difference
+     *  between the existence intervals of the endpoints and the
+     *  penalty factor.
+     */
+    template <typename T>
+    double existencePenalty( TreeInfo& ti, const T& vert, const double& penalty ) {
+        if (vert.f() || vert.r()) {
+            if (ti.intervalDistance( vert.u(), vert.v() ) > 0.0) {
+                return penalty * ti.intervalDistance( vert.u(), vert.v() );
+            }
+        }
+        return 0.0;
+    }
 
-    void viterbi( unique_ptr<ForwardHypergraph>& H, Tree* t, const vector<size_t>& order, slnDictT& slnDict ) {
+    void viterbiCount( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict ) {
+
+        // Compute probability for each node being in an optimal
+        // derivation using a variant of the forward-backward algorithm
+
+        // Each leaf has a single solution of optimal cost
+        for ( const auto& vit : order ) {
+            if ( H->incident(vit).size() == 0 ) { countDict[vit] = cl_I(1); }
+        }
+
+        // For each edge, count the number of solutions having each score
+        Google< size_t, vector< tuple<double,cl_I> > >::Map edgeCountMap;
+
+        // A map holding which edges are used to obtain *an* optimal
+        // solution for each vertex
+        Google<size_t, vector<size_t>>::Map usedEdges;
+        edgeCountMap.set_empty_key(std::numeric_limits<size_t>::max());
+        usedEdges.set_empty_key(std::numeric_limits<size_t>::max());
+
+        auto N = H->order();
+        size_t ctr=0;
+        // For each vertex, in topological order (backward)
+        for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr ) {
+            cerr << "\r\rProcessed " << 100.0*(static_cast<float>(ctr)/N) << "% of the vertices";
+            auto vert = H->vertex(*vit);
+
+            // The cost for deriving this vertex that a new derivation
+            // has to beat
+            double cval = ( slnDict.find(*vit) == slnDict.end() ) ? std::numeric_limits<double>::max() : slnDict[*vit][0].cost;
+
+            vector<double> edgeCosts;
+            vector<cl_I> edgeCounts;
+            vector<size_t> edgeInds;
+
+            // Soft constraint for edge existence
+            auto ePen = existencePenalty(ti, vert, penalty);
+
+            // loop over all incoming edges and compute the # of
+            // solutions over each edge as well as that solution's cost
+            for ( const auto& e : H->incident(*vit) ) {
+                auto edge = H->edge(e);
+                auto hind = edge.head();
+                auto w = edge.weight();
+                auto tvert = H->vertex(edge.tail()[0]);
+
+                auto tval = ePen + w;
+                cl_I numEdgeSln(1);
+
+                for ( const auto& tn : edge.tail() ){
+                    // We pay for satisfying each tail vertex
+                    tval += slnDict[tn][0].cost;
+                    // The solutions of tail vertices can be
+                    // independently combined
+                    numEdgeSln = numEdgeSln * countDict[tn];
+                }
+
+                edgeCosts.push_back(tval);
+                edgeCounts.push_back( numEdgeSln );
+                edgeInds.push_back(e);
+                edgeCountMap[e].push_back( make_tuple(tval,numEdgeSln) );
+            }
+            // If we traversed any optimal edges
+            if ( edgeCosts.size() > 0 ) {
+
+                // Find the minimum cost edge
+                Google<Derivation::flipT>::Set fs;
+                fs.set_empty_key( Derivation::flipT(-1,-1,"") );
+
+                auto minCost = *(std::min_element(edgeCosts.begin(), edgeCosts.end()));
+                slnDict[*vit][0] = Derivation(minCost, 0, vector<size_t>(), fs);
+                // Count the number of optimal solutions at this head node
+                cl_I numSln(0);
+                for( size_t i = 0; i < edgeCosts.size(); ++i ) {
+                    if ( edgeCosts[i] == minCost ) {
+                        numSln += edgeCounts[i];//cl_F(minCost / edgeCosts[i]) + edgeCounts[i];
+                        usedEdges[*vit].push_back( edgeInds[i] );
+                    }
+                }
+                // put the answer in the count dictionary
+                countDict[*vit] = numSln;
+            }
+        }
+        // loop over verts
+        cerr << "\n";
+
+
+        typedef Google< size_t, cl_RA >::Map probMapT;
+
+        auto getOrElse = [] ( probMapT& pm, const size_t& key, cl_RA alt ) {
+            return (pm.find(key) == pm.end()) ? alt : pm[key];
+        };
+
+        cerr << "Backward step \n";
+
+        probMapT probMap;
+        probMap.set_empty_key( std::numeric_limits<size_t>::max() );
+
+        FlipKey rootKey( t->getRootId(), t->getRootId(), false, false);
+        auto rootInd = H->index(rootKey);
+        // The root gets a probability of 1
+        probMap[rootInd] = cl_RA(1);
+
+        ctr = 0;
+        size_t tot = order.size();
+
+        // Compute the probabilities (forward)
+        // Loop over all vertices in reverse topological order
+        for ( auto vit = order.rbegin(); vit != order.rend(); ++vit, ++ctr ) {
+            cerr << "\r\rprocessing node " << ctr << "/" << tot;
+
+            auto key = H->vertex(*vit);
+            auto parentProb = probMap[*vit];
+            auto parentCount = countDict[*vit];
+
+            // for all incoming edges
+            for ( auto& e : usedEdges[*vit] ) {
+                // for all tail vertices of this edge
+                auto tail = H->getTail(e);
+                for ( const auto& tind : tail ) {
+                    auto condProb = get<1>(edgeCountMap[e].back()) / parentCount;
+                    auto currentProb = getOrElse( probMap, tind, cl_RA(0) );
+                    probMap[tind] = currentProb + (parentProb * condProb);
+                }
+            }
+        }
+
+        string fname = "edgeProbs.txt";
+        std::fstream output( fname, std::fstream::out | std::fstream::trunc );
+
+        for ( auto vit = order.rbegin(); vit != order.rend(); ++vit ) {
+            auto key = H->vertex(*vit);
+            auto approxProb = double_approx(probMap[*vit]);
+            auto fs = flipStrMap[key.getDirTuple()];
+            if ( approxProb > 0.0 && fs != "n" ) {
+                output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
+                       << "\t" << fs << "\t" << approxProb << "\n";
+
+            }
+        }
+        output.close();
+        std::cerr << "\n";
+
+    }
+
+
+
+    void viterbi( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict ) {
         auto N = H->order();
         size_t ctr=0;
         for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr ) {
@@ -489,7 +708,15 @@ namespace MultiOpt {
             if ( slnDict.find(*vit) != slnDict.end() ) {
                 cval = slnDict[*vit][0].cost;
             }
+
             //    cout << "COST = " << cval << "\n";
+
+            auto existencePenalty = 0.0;
+            if (vert.f() || vert.r()) {
+                if (ti.intervalDistance( vert.u(), vert.v() ) > 0.0) {
+                    existencePenalty = penalty * ti.intervalDistance( vert.u(), vert.v() );
+                }
+            }
 
             for ( auto& e : H->incident(*vit) ) {
                 auto edge = H->edge(e);
@@ -516,7 +743,9 @@ namespace MultiOpt {
                     //children += "[ " + t->getNodeName(cvert.u()) + ", " + t->getNodeName(cvert.v()) + " : (" + lexical_cast<string>(cvert.f()) + lexical_cast<string>(cvert.r()) +")] ";
                 }
 
-                if ( w > 0 ) { flips.insert( make_tuple(vert.u(), vert.v(), flipType(vert,tvert)) ); }
+                auto ft = flipType(vert,tvert);
+                if ( ft != "n" ) { flips.insert( make_tuple(vert.u(), vert.v(), ft ) ); }
+
                 if (tval <= cval) {
                     vector<size_t> bp( edge.tail().size(), 0 );
                     slnDict[hind][0] = Derivation(tval, e, bp, flips);
@@ -549,7 +778,7 @@ namespace MultiOpt {
         for ( auto& e : v ) { cerr << e << " "; } cerr << "]";
     }
 
-    void getCandidates( const unique_ptr<ForwardHypergraph>& H, slnDictT& d, size_t v, size_t k, vector<Derivation>* kbest ){
+    void getCandidates( const unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, size_t v, size_t k, vector<Derivation>* kbest ){
         // There is only one candidate for any leaf node
         auto incoming = H->incident(v);
         auto numEdges = incoming.size();
@@ -560,11 +789,20 @@ namespace MultiOpt {
         // The head vertex and it's constituent tree nodes
         auto hvert = H->vertex(v);
         auto a = hvert.u(); auto b = hvert.v();
+
+        auto existencePenalty = 0.0;
+        if (hvert.f() || hvert.r()) {
+            if (ti.intervalDistance( a, b ) > 0.0) {
+                existencePenalty = penalty * ti.intervalDistance( a, b );
+            }
+        }
+
+
         // Initalize the heap with the 1-best solution for each incoming edge
         for ( auto e : incoming ) {
             // Compute the score of this derivation
             auto edge = H->edge(e);
-            auto w = edge.weight();
+            auto w = existencePenalty + edge.weight();
             auto tail = edge.tail();
             // The DBP pointing to the 1-best solution of all of tail vertices of this edge
             vector<size_t> j( tail.size(), 0);
@@ -590,7 +828,7 @@ namespace MultiOpt {
                 for ( auto& f : d[t][0].flips ) { ed.insert(f); }
             }
 
-            if ( w > 0.0 ) { ed.insert( make_tuple(a,b,ft) ); }
+            if ( ft != "n" ) { ed.insert( make_tuple(a,b,ft) ); }
 
             //make_heap( temp.begin(), temp.end() );
             temp.push_back( Derivation(s, e, j, ed) );
@@ -633,10 +871,10 @@ namespace MultiOpt {
         return !hasDiffElement;
     }
 
-    void lazyKthBest( unique_ptr<ForwardHypergraph>& H, slnDictT& d, size_t v, size_t k, size_t kp );
+    void lazyKthBest( unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, size_t v, size_t k, size_t kp );
 
-    void lazyNext( unique_ptr<ForwardHypergraph>& H, slnDictT& d, vector<Derivation>* locCand, size_t eind,
-                   const vector<size_t>& j, size_t kp) {
+    void lazyNext( unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, vector<Derivation>* locCand, size_t eind,
+               const vector<size_t>& j, size_t kp) {
 
         auto edge = H->edge(eind);
         auto tail = edge.tail();
@@ -645,6 +883,13 @@ namespace MultiOpt {
         auto a = hvert.u(); auto b = hvert.v();
 
         auto ft = flipType(hvert, tvert);
+
+        auto existencePenalty = 0.0;
+        if (hvert.f() || hvert.r()) {
+            if (ti.intervalDistance( a, b ) > 0.0) {
+                existencePenalty = penalty * ti.intervalDistance( a, b );
+            }
+        }
 
         // For each tail node in this edge
         size_t i = 0;
@@ -663,7 +908,7 @@ namespace MultiOpt {
             // Compute it recursively
             //cerr << "Calling lazyKthBest on " << vind << "  ";
             //printVector(jp);
-            lazyKthBest( H, d, vind, jp[i], kp );
+            lazyKthBest( H, ti, penalty, d, vind, jp[i], kp );
 
 
 
@@ -674,7 +919,7 @@ namespace MultiOpt {
                 // the children
 
                 auto w = edge.weight();
-                auto s = w;
+                auto s = existencePenalty + w;
                 Google<Derivation::flipT>::Set ed;
                 ed.set_empty_key( make_tuple(-1,-1,""));
                 //set<Derivation::flipT> ed;
@@ -710,7 +955,7 @@ namespace MultiOpt {
                 }
 
 
-                if ( w > 0.0 ) {
+                if ( ft != "n" ) {
                     // If this edge is effective, then it is added to the effective edges of this derivation
                     ed.insert( make_tuple(a,b,ft) );
                 }
@@ -735,7 +980,7 @@ namespace MultiOpt {
     }
 
 
-    void lazyKthBest( unique_ptr<ForwardHypergraph>& H, slnDictT& d, size_t v, size_t k, size_t kp ) {
+    void lazyKthBest( unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, size_t v, size_t k, size_t kp ) {
         // If this is our first vist to vertex v, then
         // populate its candidate list
 
@@ -745,7 +990,7 @@ namespace MultiOpt {
             //if ( kp == 0 ) { recursedStore.set_empty_key( make_tuple(std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()) ); }
             cand[v] = new vector< Derivation >();
             //cerr << "done \n";
-            getCandidates(H, d, v, kp, cand[v]);
+            getCandidates(H, ti, penalty, d, v, kp, cand[v]);
             /*
             cerr << "Added candidates for node " << v << "\n[\n";
             for ( auto& c : cand[v] ) {
@@ -774,7 +1019,7 @@ namespace MultiOpt {
                         //cerr << " current bp = ";
                         //printVector(bp);
                         //cerr << "calling lazy next on cand[" << v << "]\n";
-                        lazyNext(H, d, cand[v], deriv.target, deriv.bp, kp);
+                        lazyNext(H, ti, penalty, d, cand[v], deriv.target, deriv.bp, kp);
                     }
                     //if (v, lastInd) not in recursedStore: recursedStore[ (v, lastInd) ] = False
                     recursedStore.insert( make_tuple(v, lastInd) );
@@ -814,7 +1059,7 @@ namespace MultiOpt {
                     //cerr << "skipping solution " << deriv << "\n";
                     if ( H->incident(v).size() > 0 ) {
                         //cerr << "2 calling lazyNext on cand[" << v << "]\n";
-                        lazyNext(H, d, cand[v], deriv.target, deriv.bp, kp);
+                        lazyNext(H, ti, penalty, d, cand[v], deriv.target, deriv.bp, kp);
                     }
                 }
             } else {

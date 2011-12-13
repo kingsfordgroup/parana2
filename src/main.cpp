@@ -3,7 +3,6 @@
 #include <set>
 #include <stdexcept>
 #include <cmath>
-#include <fstream>
 #include <algorithm>
 #include <numeric>
 #include <unordered_map>
@@ -35,6 +34,11 @@
 #include "MultiOpt.hpp"
 #include "utils.hpp"
 
+/** CLN **/
+#include <cln/io.h>
+#include <cln/rational_io.h>
+#include <cln/integer_io.h>
+
 /** Namespace uses */
 using std::string;
 using std::ifstream;
@@ -61,6 +65,8 @@ using boost::variant;
 using boost::lexical_cast;
 using Utils::TreeInfo;
 
+#include <cstdlib>
+
 const std::string getName(Tree* t, int nid) {
     if (t->hasNodeName(nid)) {
         return t->getNodeName(nid);
@@ -75,6 +81,15 @@ string getExtantNetwork(const string& s) {
 
 
 void prepareTree( Tree* t, TreeInfo& ti, int nid ) {
+    // if the current node is not the root
+    if ( nid != t->getRootId() ) {
+        auto fid = t->getFatherId(nid);
+        auto parentDeathT = get<1>(ti.extantInterval[fid]);
+        assert ( ti.extantInterval.find(fid) != ti.extantInterval.end() );
+        ti.extantInterval[ nid ] = make_tuple( parentDeathT, parentDeathT + t->getDistanceToFather(nid) );
+    }
+
+
     if (t->isLeaf(nid)) {
         ti.leaves[nid] = {nid};
         ti.subnodes[nid] = {nid};
@@ -84,6 +99,7 @@ void prepareTree( Tree* t, TreeInfo& ti, int nid ) {
         ti.leaves[nid] = { nid };
         ti.subnodes[nid] = { nid };
         ti.enets[nid] = {};
+
 
         for ( auto cid : t->getSonsId(nid) ) {
             prepareTree( t, ti, cid );
@@ -111,6 +127,7 @@ int main( int argc, char **argv ){
         ("help,h", "produce this message")
         ("dupHist,d", po::value< string >(), "mesh input file")
         ("target,t", po::value< string >(), "extant graph file")
+        ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
         ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
         ;
 
@@ -119,6 +136,9 @@ int main( int argc, char **argv ){
         ap.parse_args( argc, argv );
         string treeName = ap["dupHist"].as<string>();
         string graphName = ap["target"].as<string>();
+
+        double creationCost = ap["ratio"].as<double>();
+        double deletionCost = 1.0;
 
         bool undirected = ap.isPresent("undir");
         bool directed = !undirected;
@@ -151,15 +171,25 @@ int main( int argc, char **argv ){
                 }
             }
             */
+
+            int zcount = 0;
+            for ( auto n : tree->getNodesId() ) {
+                if ( n != tree->getRootId() ) {
+                    auto dist = tree->getDistanceToFather(n);
+                    if ( dist == 0.0 ) { zcount++; }
+                    cout << tree->getDistanceToFather(n) << " ";
+                }
+            } cout << "\n";
+            cout << zcount << " branches had length 0\n";
             TreeInfo tinfo("TreeInfo");
-            prepareTree( tree, tinfo, tree->getRootId() );
+            auto rId = tree->getRootId();
+            tinfo.extantInterval[ rId ] = make_tuple( 0.0, 0.0 );
+            prepareTree( tree, tinfo, rId );
 
             for ( auto nid : tree->getNodesId() ){
                 auto nodeName = getName(tree,nid);
-                cout << "Node [" << nodeName << "]\n";
-                for ( auto enet : tinfo.enets[nid] ) {
-                    cout << enet << ", ";
-                }
+                cout << "Node [" << nodeName << "] : existance interval = [" <<
+                    get<0>(tinfo.extantInterval[nid]) << ", " << get<1>(tinfo.extantInterval[nid]) << "] \n";
             }
 
 
@@ -181,39 +211,54 @@ int main( int argc, char **argv ){
             }
 
             //typedef graph_traits < graphT >::vertex_descriptor vertexDescT;
-            //typedef graph_traits < graphT >::edge_descriptor edgeDescT;
+            //typedef graph_traits < graphT >::edge_descriptor
+            //edgeDescT;
 
-            auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, directed );
+            double penalty = 0.0;//std::numeric_limits<double>::infinity();
+            auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
             vector<size_t> order; order.reserve( H->order() );
             MultiOpt::topologicalOrder( H, order );
 
             MultiOpt::slnDictT slnDict;
             //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
             if ( undirected ) {
-                MultiOpt::leafCostDict( H, tree, get<undirectedGraphT>(G), directed, 1.0, 1.0, slnDict);
+                MultiOpt::leafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
             } else {
-                MultiOpt::leafCostDict( H, tree, get<directedGraphT>(G), directed, 1.0, 1.0, slnDict);
+                MultiOpt::leafCostDict( H, tree, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
             }
 
-            MultiOpt::viterbi( H, tree, order, slnDict );
 
             auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false );
             auto rootInd = H->index(rootKey);
 
-            auto totalDerivs = 1000;
+            // Count the # of opt slns.
+            MultiOpt::countDictT countDict;
+            countDict.set_empty_key(-1);
+            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict);
+
+            cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
+            cout << "There are " << countDict[rootInd] << " optimal solutions ";
+
+            return 0;
+
+
+            MultiOpt::viterbi( H, tree, tinfo, penalty, order, slnDict );
+
+            auto totalDerivs = 10;
             auto derivNum = 0;
             double prevCost, newCost;
             prevCost = newCost = slnDict[ rootInd ][ derivNum ].cost;
             MultiOpt::initKBest();
 
             while ( derivNum < totalDerivs || prevCost == newCost ) {
-                MultiOpt::lazyKthBest( H, slnDict, rootInd, derivNum, derivNum );
+                MultiOpt::lazyKthBest( H, tinfo, penalty, slnDict, rootInd, derivNum, derivNum );
                 cerr << "returned from call to lazy" << derivNum << "best!!\n";
                 auto d = slnDict[ rootInd ][ derivNum ];
                 cout << "DERIVATION # " << derivNum << ": for [(" << tree->getNodeName(rootKey.u()) << ", " << tree->getNodeName(rootKey.v()) <<  ") : (" << rootKey.f() << rootKey.r() << ")] (" << d.cost << ")\n";
 
                 string fname = "outputDir/output.txt." + lexical_cast<string>(derivNum);
                 std::fstream output( fname, std::fstream::in | std::fstream::out | std::fstream::app );
+                //output.seekp( 0 );
                 for ( auto f : d.flips ) {
                     cout << " [ " << tree->getNodeName(get<0>(f)) << ", " << tree->getNodeName(get<1>(f)) << " : " << get<2>(f) <<  "]\n";
                     output << tree->getNodeName(get<0>(f)) << "\t" << tree->getNodeName(get<1>(f)) << "\t" << get<2>(f).substr(0,1) << "\n";

@@ -22,6 +22,7 @@ LINK_DIRECTORIES(
   ${PROJECT_ROOT}/lib
 )
 
-LINK_LIBRARIES( m pthread ${Boost_LIBRARIES} profiler bpp-core bpp-phyl bpp-seq)
+LINK_LIBRARIES( m pthread ${Boost_LIBRARIES} profiler bpp-core
+bpp-phyl bpp-seq cln)
 
 ADD_EXECUTABLE( parana++ ${PARANA_SRCS} )
