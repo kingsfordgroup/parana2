@@ -15,6 +15,21 @@
 #include <chrono>
 #include <random>
 #include <iterator>
+#include <queue>
+#include <functional>
+#include <set>
+#include <cln/rational.h>
+#include <cln/integer.h>
+#include <cln/float.h>
+#include <cln/real.h>
+#include <cln/rational_io.h>
+#include <cln/integer_io.h>
+#include <cln/float_io.h>
+#include <cln/real_io.h>
+
+
+#include "utils.hpp"
+
 
 typedef std::mt19937 MyRNG;  // the Mersenne Twister with a popular choice of parameters
 uint32_t seed_val;           // populate somehow
@@ -39,6 +54,11 @@ using std::unordered_set;
 using std::string;
 using std::array;
 using std::vector;
+using cln::cl_R;
+using cln::cl_RA;
+using cln::cl_I;
+using cln::cl_F;
+using cln::cl_LF;
 /*
 namespace std {
     template<>
@@ -246,7 +266,70 @@ std::cout << "f() took "
 << " milliseconds\n";
 */
 
+    vector<size_t> t = {0,0,0};
+    vector<size_t> s = {3,4,2};
+    typedef tuple<double, vector<size_t> > dvsT;
 
+    class QueueCmp {
+    public:
+        bool operator() ( const dvsT& lhs, const dvsT& rhs ) {
+            return get<0>(lhs) < get<0>(rhs);
+        }
+    };
+
+    vector<dvsT> pq;
+    QueueCmp pqComp;
+    pq.push_back( make_tuple(0.0, t) );
+
+    double cc = 0;
+
+    std::function< double(const vector<size_t>&) > computeScore = [&] ( const vector<size_t>& ) {
+        cc -= 1.0;
+        return cc;
+    };
+
+    size_t it = 0;
+    while ( !pq.empty() ) {
+
+
+        auto top = pq.front();
+        //std::pop_heap( pq.begin(), pq.end(), pqComp ); pq.pop_back();
+        cerr << "top is [ " << get<0>(top) << " ] : ";
+        for (const auto& e : get<1>(top) ) { std::cerr << e << " "; }
+        std::cerr << "\n";
+
+        Utils::appendNext(s, pq, pqComp, computeScore);
+        ++it;
+    }
+
+    auto tup = make_tuple( 0.3, 563 );
+    get<1>(tup) = get<1>(tup) + 29;
+    std::cerr << "t = " << get<0>(tup) << ", " << get<1>(tup) << "\n";
+
+    std::map<double, int> st = { {0.0, 0}, {0.1, 1}, {0.11, 2}, {0.2, 3},  {0.2, 4}, {0.0, 5}};
+
+    cerr << "st = ";
+    for (const auto& e : st ) { cerr << e.first << ":" << e.second << ", "; }
+    cerr << "\n";
+
+    vector<double> v = {0.1, 0.2, 0.4};
+    vector<cl_R> v2;
+    cl_I one(1);
+    cerr << "v2 = ";
+    for ( const auto& e : v ) {
+        v2.push_back( cl_R(1.0 / e) );
+        cerr << one * v2.back() << " ";
+    }
+    cerr << "\n";
+
+    std::cerr << "there were " << it << " product elements \n";
+
+    for ( auto i = t.rbegin(); i != t.rend(); ++i ) {
+        (*i)++;
+    }
+    cerr << "t = ";
+    for ( const auto& e : t ) { cerr << e << " "; }
+    cerr << "\n";
 
     std::set<int> a = {1,2,3,4,5};
     std::set<int> b = {3,4,7,8,9};

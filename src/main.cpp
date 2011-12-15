@@ -237,7 +237,7 @@ int main( int argc, char **argv ){
             MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict);
 
             cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
-            cout << "There are " << countDict[rootInd] << " optimal solutions ";
+            cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";
 
             return 0;
 

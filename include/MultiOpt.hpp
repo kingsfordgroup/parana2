@@ -2,6 +2,7 @@
 #define MULTI_OPT_HPP
 
 #include <fstream>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <tuple>
@@ -74,13 +75,16 @@ namespace MultiOpt {
     using cln::cl_I;
     using cln::cl_F;
     using cln::cl_RA;
+    using cln::cl_R;
     using cln::cl_float;
     using google::dense_hash_set;
     using google::dense_hash_map;
     using google::sparse_hash_map;
+    using std::map;
     using std::unordered_map;
     using std::unordered_set;
     using std::tuple;
+    using std::tie;
     using std::make_tuple;
     using std::string;
     using std::get;
@@ -117,7 +121,7 @@ namespace MultiOpt {
     };
 
     typedef unordered_map< size_t, unordered_map<size_t, Derivation>> slnDictT;
-    typedef Google< size_t, cl_I >::Map countDictT;
+    typedef Google< size_t, vector< tuple<double, cl_I> > >::Map countDictT;
     //typedef unordered_map<size_t, vector<Derivation>> slnDictT;
     //typedef Google<size_t, vector<Derivation>>::Map slnDictT;
     //typedef Google<size_t, Google<size_t,Derivation>::Map>::Map slnDictT;
@@ -551,40 +555,149 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
         return 0.0;
     }
 
-    void viterbiCount( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict ) {
+    typedef tuple<double, vector<size_t> > dvsT;
 
-        // Compute probability for each node being in an optimal
-        // derivation using a variant of the forward-backward algorithm
+    class QueueCmp {
+    public:
+        bool operator() ( const dvsT& lhs, const dvsT& rhs ) {
+            return get<0>(lhs) > get<0>(rhs);
+        }
+    };
 
-        // Each leaf has a single solution of optimal cost
-        for ( const auto& vit : order ) {
-            if ( H->incident(vit).size() == 0 ) { countDict[vit] = cl_I(1); }
+
+    // 0 : 20 23 25
+    // 1 : 15 16 34
+    // 2 : 10 12 13
+    // rank, #
+    // (0, 3000)
+    //
+    vector< tuple<double, cl_I> > countEdgeSolutions( const double& ecost,
+                                                      const vector<size_t>& tailNodes,
+                                                      countDictT& countDict,
+                                                      const size_t& k ) {
+        // product pointers
+        std::vector< size_t > prodElems(0, tailNodes.size());
+        std::vector< size_t > elemSizes; elemSizes.reserve(tailNodes.size());
+        double cost = ecost;
+        for ( const auto& t : tailNodes ) {
+            elemSizes.push_back( countDict[t].size() );
+            cost += get<0>(countDict[t].front());
         }
 
+        vector<dvsT> pq(1, make_tuple(cost, vector<size_t>(tailNodes.size(), 0)));
+        QueueCmp ord;
+
+        std::function< double( const vector<size_t>& ) > computeScore = [&] ( const vector<size_t>& inds ) -> double {
+            size_t numNodes = tailNodes.size();
+            double cost = ecost;
+            for ( size_t i = 0; i < numNodes; ++i ) {
+                cost += get<0>(countDict[ tailNodes[i] ][ inds[i] ]);
+            }
+            return cost;
+        };
+
+        typedef tuple<double, cl_I> ccT;
+        vector< ccT > edgeSlns;
+        double epsilon = 1e-5;
+        size_t numSln = 0;
+
+        while ( !pq.empty() && numSln < k ) {
+
+            double cost;
+            vector<size_t> inds;
+            // Get the next best solution score from the top of the queue
+            std:tie(cost, inds) = pq.front();
+            // Compute the number of ways we can obtain this solution
+            cl_I numSlns(1);
+            for ( size_t i = 0; i < inds.size(); ++i ) { numSlns *= get<1>(countDict[ tailNodes[i] ][ inds[i] ]); }
+
+            // put this solution into our # sln dict
+            auto fp = std::find_if( edgeSlns.begin(), edgeSlns.end(), [=]( const ccT& cc ) ->bool { return (abs(cost - get<0>(cc)) <= epsilon);  } );
+            if (fp == edgeSlns.end()) { // we didn't find a solution  of this score
+                edgeSlns.push_back( make_tuple( cost, numSlns ) );
+            } else { // we found a solution of this score
+                get<1>(*fp) = get<1>(*fp) + numSlns;
+            }
+
+            Utils::appendNext( elemSizes, pq, ord, computeScore );
+            numSln = edgeSlns.size();
+        }
+        return edgeSlns;
+    }
+
+
+    vector<cl_RA> computeAlphas( const vector<tuple<double, cl_I>>& slnVec ) {
+        vector<cl_RA> scores; scores.reserve(slnVec.size());
+        cl_RA invSum(0);
+        cl_RA one(1);
+        for (const auto& e : slnVec) {
+            scores.push_back( one / static_cast<size_t>(get<0>(e)+1.0) );
+            invSum += scores.back();
+        }
+        //cl_RA invSum = 1 / sum;
+        // cerr << "invSum = " << invSum << "\n";
+        vector<cl_RA> alphas; alphas.reserve(slnVec.size());
+        for (const auto& s : scores) {
+            alphas.push_back( s/invSum );
+        }
+        return alphas;
+    }
+
+    vector<double> computeAlphasDouble( const vector<tuple<double, cl_I>>& slnVec ) {
+        vector<double> scores; scores.reserve(slnVec.size());
+        double bestScore = get<0>(slnVec.front());
+        double worstScore = get<0>(slnVec.back());
+        double diff = std::max(1.0, worstScore - bestScore);
+        double sigma = 0.05;
+        double invSum(0);
+        //cl_RA one(1);
+        for (const auto& e : slnVec) {
+            scores.push_back( std::exp( (bestScore-get<0>(e)) / (sigma*diff) ) );/// (diff*diff) ) );//1.0 /( get<0>(e)+1.0 ) );
+            invSum += scores.back();
+        }
+
+        vector<double> alphas; alphas.reserve(slnVec.size());
+        for (const auto& s : scores) {
+            alphas.push_back( s/invSum );
+        }
+        return alphas;
+    }
+
+
+
+    void viterbiCount( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict ) {
+
+        // Compute the *weighted* probability of each edge being in
+        // the top k distinct scoring solutions
+
+        // Each leaf has a single solution which is, by definition, of optimal cost
+        for ( const auto& vit : order ) {
+            if ( H->incident(vit).size() == 0 ) {countDict[vit].push_back( make_tuple(slnDict[vit][0].cost, cl_I(1)) );}
+        }
+
+        size_t k = 15;
+
         // For each edge, count the number of solutions having each score
-        Google< size_t, vector< tuple<double,cl_I> > >::Map edgeCountMap;
+        unordered_map< size_t, unordered_map< double, cl_I > > edgeCountMap;
+        unordered_map< size_t, unordered_map< double, double > > edgeProbMap;
 
         // A map holding which edges are used to obtain *an* optimal
         // solution for each vertex
-        Google<size_t, vector<size_t>>::Map usedEdges;
-        edgeCountMap.set_empty_key(std::numeric_limits<size_t>::max());
+        Google<size_t, unordered_map<double, unordered_set<size_t> >>::Map usedEdges;
         usedEdges.set_empty_key(std::numeric_limits<size_t>::max());
 
         auto N = H->order();
         size_t ctr=0;
+
         // For each vertex, in topological order (backward)
         for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr ) {
             cerr << "\r\rProcessed " << 100.0*(static_cast<float>(ctr)/N) << "% of the vertices";
             auto vert = H->vertex(*vit);
 
-            // The cost for deriving this vertex that a new derivation
-            // has to beat
+            // The cost for deriving this vertex that a new derivation has to beat
             double cval = ( slnDict.find(*vit) == slnDict.end() ) ? std::numeric_limits<double>::max() : slnDict[*vit][0].cost;
 
-            vector<double> edgeCosts;
-            vector<cl_I> edgeCounts;
-            vector<size_t> edgeInds;
-
+            map< double, vector<tuple<size_t,cl_I> > > edgeCostMap;
             // Soft constraint for edge existence
             auto ePen = existencePenalty(ti, vert, penalty);
 
@@ -599,47 +712,74 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
                 auto tval = ePen + w;
                 cl_I numEdgeSln(1);
 
-                for ( const auto& tn : edge.tail() ){
-                    // We pay for satisfying each tail vertex
-                    tval += slnDict[tn][0].cost;
-                    // The solutions of tail vertices can be
-                    // independently combined
-                    numEdgeSln = numEdgeSln * countDict[tn];
-                }
+                auto currentEdgeSlns = countEdgeSolutions( tval, edge.tail(), countDict, k );
 
-                edgeCosts.push_back(tval);
-                edgeCounts.push_back( numEdgeSln );
-                edgeInds.push_back(e);
-                edgeCountMap[e].push_back( make_tuple(tval,numEdgeSln) );
+                for ( const auto& ent : currentEdgeSlns ) {
+                    double score; cl_I count;
+                    tie(score, count) = ent;
+                    auto insertIt = edgeCostMap.find( score );
+                    auto edgeContrib = make_tuple(e, count);
+
+                    if ( insertIt == edgeCostMap.end() ) {
+                        vector< tuple<size_t, cl_I > > r(1, edgeContrib);
+                        edgeCostMap[ score ] = r;
+                    } else {
+                        insertIt->second.push_back( edgeContrib );
+                    }
+                    edgeCountMap[ e ][ score ] = count;
+                }
             }
             // If we traversed any optimal edges
-            if ( edgeCosts.size() > 0 ) {
+            if ( edgeCostMap.size() > 0 ) { //edgeCosts.size() > 0 ) {
+                //cerr << "AM I CRAZY?\n";
+                typedef tuple<double, cl_I, size_t> edgeSlnT;
+                double minCost = std::numeric_limits<double>::max();
+                size_t mk = std::min( edgeCostMap.size(), k );
+                size_t ctr = 0;
+
+                for ( auto cmIt = edgeCostMap.begin(); cmIt != edgeCostMap.end() && ctr < mk; ++cmIt, ++ctr ) {
+                    auto score = cmIt->first;
+                    //cerr << "ctr = " << ctr << ", score = " << score << "\n";
+                    const auto& providingEdges = cmIt->second;
+                    minCost = std::min(minCost, score);
+                    cl_I numSln(0);
+                    for ( const auto& edgeCount : providingEdges ) {
+                        size_t edgeInd; cl_I count;
+                        tie(edgeInd, count) = edgeCount;
+                        if ( usedEdges[*vit].find(score) == usedEdges[*vit].end() ) {
+                            usedEdges[*vit][score] = { edgeInd };
+                        } else {
+                            usedEdges[*vit][score].insert( edgeInd );
+                        }
+                        numSln += count;
+                    }
+                    countDict[*vit].push_back( make_tuple(score, numSln) );
+
+                    for ( const auto& edgeCount : providingEdges ) {
+                        size_t edgeInd; cl_I count;
+                        tie(edgeInd, count) = edgeCount;
+                        double edgeProb = double_approx( count / numSln );
+                        edgeProbMap[edgeInd][score] = edgeProb;
+                    }
+
+                }
+
+
 
                 // Find the minimum cost edge
                 Google<Derivation::flipT>::Set fs;
                 fs.set_empty_key( Derivation::flipT(-1,-1,"") );
+                slnDict[*vit][0] = Derivation( minCost, 0, vector<size_t>(), fs);
 
-                auto minCost = *(std::min_element(edgeCosts.begin(), edgeCosts.end()));
-                slnDict[*vit][0] = Derivation(minCost, 0, vector<size_t>(), fs);
-                // Count the number of optimal solutions at this head node
-                cl_I numSln(0);
-                for( size_t i = 0; i < edgeCosts.size(); ++i ) {
-                    if ( edgeCosts[i] == minCost ) {
-                        numSln += edgeCounts[i];//cl_F(minCost / edgeCosts[i]) + edgeCounts[i];
-                        usedEdges[*vit].push_back( edgeInds[i] );
-                    }
-                }
-                // put the answer in the count dictionary
-                countDict[*vit] = numSln;
             }
         }
         // loop over verts
         cerr << "\n";
 
 
-        typedef Google< size_t, cl_RA >::Map probMapT;
+        typedef Google< size_t, double >::Map probMapT;
 
-        auto getOrElse = [] ( probMapT& pm, const size_t& key, cl_RA alt ) {
+        auto getOrElse = [] ( probMapT& pm, const size_t& key, double alt ) {
             return (pm.find(key) == pm.end()) ? alt : pm[key];
         };
 
@@ -651,7 +791,8 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
         FlipKey rootKey( t->getRootId(), t->getRootId(), false, false);
         auto rootInd = H->index(rootKey);
         // The root gets a probability of 1
-        probMap[rootInd] = cl_RA(1);
+        probMap[rootInd] = 1.0;//cl_RA(1);
+        //probMap[rootInd] = cl_RA(1);
 
         ctr = 0;
         size_t tot = order.size();
@@ -663,16 +804,25 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
 
             auto key = H->vertex(*vit);
             auto parentProb = probMap[*vit];
-            auto parentCount = countDict[*vit];
 
-            // for all incoming edges
-            for ( auto& e : usedEdges[*vit] ) {
-                // for all tail vertices of this edge
-                auto tail = H->getTail(e);
-                for ( const auto& tind : tail ) {
-                    auto condProb = get<1>(edgeCountMap[e].back()) / parentCount;
-                    auto currentProb = getOrElse( probMap, tind, cl_RA(0) );
-                    probMap[tind] = currentProb + (parentProb * condProb);
+            auto alphas = computeAlphasDouble( countDict[*vit] );
+            //cerr << "alphas : ";
+            //for ( const auto& a : alphas ) { cerr << a << " "; }
+            //cerr << "\n";
+            // for each top-k score at this node
+            for ( size_t i = 0; i < countDict[*vit].size(); ++i ) {
+                double pScore; cl_I pCount;
+                tie(pScore, pCount) = countDict[*vit][i];
+
+                // for all incoming edges contributing to this score
+                for ( const auto& e : usedEdges[*vit][pScore] ) {
+                    auto condProb = edgeProbMap[e][pScore];//cl_RA(edgeCountMap[e][pScore] / pCount);
+                    // for all tail vertices of this edge
+                    auto tail = H->getTail(e);
+                    for ( const auto& tind : tail ) {
+                        //auto currentProb = getOrElse( probMap, tind, cl_RA(0) );
+                        probMap[tind] += (parentProb * ( alphas[i] * condProb ));
+                    }
                 }
             }
         }
@@ -682,7 +832,7 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
 
         for ( auto vit = order.rbegin(); vit != order.rend(); ++vit ) {
             auto key = H->vertex(*vit);
-            auto approxProb = double_approx(probMap[*vit]);
+            auto approxProb = probMap[*vit];//double_approx(probMap[*vit]);
             auto fs = flipStrMap[key.getDirTuple()];
             if ( approxProb > 0.0 && fs != "n" ) {
                 output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
