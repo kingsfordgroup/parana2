@@ -159,18 +159,6 @@ int main( int argc, char **argv ){
                     tree->setNodeName(nid, reinterpret_cast<bpp::BppString*>(tree->getBranchProperty(nid,prop))->toSTL() );
                 }
             }
-            /*
-            for (auto nid : tree->getNodesId()) {
-                if (tree->hasNodeName(nid)) {
-                    cout << "Node : " << tree->getNodeName(nid) << "\n";
-                } else {
-                    for (auto prop : tree->getNodePropertyNames(nid)) {
-                        auto p = reinterpret_cast<bpp::BppString*>(tree->getNodeProperty(nid,prop));
-                        cout << "Node : " << p->toSTL() << "\n";
-                    }
-                }
-            }
-            */
 
             int zcount = 0;
             for ( auto n : tree->getNodesId() ) {
@@ -196,18 +184,18 @@ int main( int argc, char **argv ){
             unordered_map<string, int> leafIDMap;
             for( auto nid : tree->getLeavesId() ) { leafIDMap[ getName(tree,nid) ] = nid; }
 
-            typedef adjacency_list<boost::hash_setS, vecS, boost::directedS, GraphUtils::Node > directedGraphT;
-            typedef adjacency_list<boost::hash_setS, vecS, boost::undirectedS, GraphUtils::Node > undirectedGraphT;
+            typedef adjacency_list<boost::hash_setS, vecS, boost::directedS, GraphUtils::Node, GraphUtils::Edge > directedGraphT;
+            typedef adjacency_list<boost::hash_setS, vecS, boost::undirectedS, GraphUtils::Node, GraphUtils::Edge > undirectedGraphT;
             variant< directedGraphT, undirectedGraphT > G;
             if ( undirected ) {
                 G = undirectedGraphT();
-                GraphUtils::readFromAdjacencyList(graphName, leafIDMap, get<undirectedGraphT>(G) );
+                GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<undirectedGraphT>(G) );
                 auto vp = vertices(get<undirectedGraphT>(G));
                 size_t i = 0;
                 for( auto it = vp.first; it != vp.second; ++it ) { cout << "Vertex " << *it << ", name =  " << get<undirectedGraphT>(G)[*it].name << " # " << i << "\n"; ++i; }
             } else {
                 G = directedGraphT();
-                GraphUtils::readFromAdjacencyList(graphName, leafIDMap, get<directedGraphT>(G) );
+                GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<directedGraphT>(G) );
             }
 
             //typedef graph_traits < graphT >::vertex_descriptor vertexDescT;

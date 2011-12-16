@@ -129,7 +129,9 @@ namespace MultiOpt {
     typedef tuple<bool,bool> flipTupleT;
     typedef tuple<double, string> costRepT;
     typedef unordered_map< flipTupleT, unordered_map<flipTupleT, costRepT> > costMapT;
+    typedef unordered_map< flipTupleT, unordered_map<flipTupleT, std::function< costRepT (const double&, const double&) > > > costMapFunT;
     typedef unordered_map< flipTupleT, unordered_map<bool, costRepT> > selfCostMapT;
+    typedef unordered_map< flipTupleT, unordered_map<bool, std::function<costRepT (const double&) > > > selfCostMapFunT;
 
 
     static FlipMapT flipDict = {
@@ -168,6 +170,97 @@ namespace MultiOpt {
         return costDict;
     }
 
+    costMapFunT getCostFunDict ( double cc, double dc, bool directed ) {
+        auto undirected = ! directed;
+        auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
+        auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+        costMapFunT costDict;
+        costDict[ none ][ none ] = [=](const double& pf, const double& pr) { return make_tuple( 0.0, "n" ); };
+        costDict[ none ][ fw ] = [=](const double& pf, const double& pr) { return make_tuple( pf*cc, "f+" ); };
+        costDict[ none ][ rev ] = [=](const double& pf, const double& pr) { return make_tuple( pr*cc, "r+" ); };
+        costDict[ none ][ both ] = [=](const double& pf, const double& pr) { return make_tuple( undirected ? pf*cc : (pf+pr)*cc, "b+" ); };
+
+
+        costDict[ rev ][ none ] = [=](const double& pf, const double& pr) { return make_tuple( pr*dc, "r-" ); };
+        costDict[ rev ][ fw ] = [=](const double& pf, const double& pr) { return make_tuple( pf*cc + pr*dc, "f+r-" ); };
+        costDict[ rev ][ rev ] = [=](const double& pf, const double& pr) { return make_tuple( (1.0-pr)*dc, "n"); };
+        costDict[ rev ][ both ] = [=](const double& pf, const double& pr) { return make_tuple( pf*cc + (1.0-pr)*dc , "f+"); };
+
+        costDict[ fw ][ none ] = [=](const double& pf, const double& pr) { return make_tuple( pf*dc, "f-"); };
+        costDict[ fw ][ fw ] = [=](const double& pf, const double& pr) { return make_tuple( (1.0-pf)*dc, "n"); };
+        costDict[ fw ][ rev ] = [=](const double& pf, const double& pr) { return make_tuple( pf*dc + pr*cc, "f-r+"); };
+        costDict[ fw ][ both ] = [=](const double& pf, const double& pr) { return make_tuple( (1.0-pf)*dc + pr*cc, "r+"); };
+
+        costDict[ both ][ none ] = [=](const double& pf, const double& pr) { return make_tuple( undirected ? pf*dc : (pf+pr)*dc, "b-" ); };
+        costDict[ both ][ fw ] = [=](const double& pf, const double& pr) { return make_tuple( (1.0-pf)*dc + pr*dc, "r-" ); };
+        costDict[ both ][ rev ] = [=](const double& pf, const double& pr) { return make_tuple( pf*dc + (1.0-pr)*dc, "f-" ); };
+        costDict[ both ][ both ] = [=](const double& pf, const double& pr) { return make_tuple( undirected ? (1.0-pf)*dc : (1.0-pf)*dc + (1.0-pr)*dc, "n" ); };
+
+        return costDict;
+    }
+
+    tuple<double,string> getCostFlip( double cc, double dc, bool directed,
+                                      const tuple<bool,bool>& from, const tuple<bool,bool>& to, const double& eprob ) {
+        auto undirected = ! directed;
+        auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
+        auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+        double cost = 0.0;
+        string flip = "";
+        if (from == none) {
+            if ( to == none ) {
+                return make_tuple( 0.0*dc, "n" );
+            }
+            if ( to == both ) {
+                return make_tuple( eprob*cc, "b+");
+            }
+        } else if ( from == both ) {
+            if ( to == both ) {
+                // keep the edge, but there is a probability of
+                // (1-eprob that we are wrong)
+                return make_tuple( (1.0 - eprob)*dc, "n" );
+            }
+            if ( to == none ) {
+                // have to delete the edge that exists with
+                // probability eprob
+                return make_tuple( eprob*dc, "b-" );
+            }
+        }
+
+    }
+
+
+    tuple<double,string> getSelfLoopCostFlip( double cc, double dc, bool directed,
+                                              const tuple<bool,bool>& from, const bool& to, const double& eprob ) {
+        auto undirected = ! directed;
+        auto none =  make_tuple(false,false); auto fw = make_tuple(true,false);
+        auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+        double cost = 0.0;
+        string flip = "";
+        if (from == none) {
+            if ( to == false ) {
+                return make_tuple( 0.0*dc, "n" );
+            }
+            if ( to == true ) {
+                return make_tuple( eprob*cc, "b+");
+            }
+        } else if ( from == both ) {
+            if ( to == true ) {
+                // keep the edge, but there is a probability of
+                // (1-eprob that we are wrong)
+                return make_tuple( (1.0 - eprob)*dc , "n" );
+            }
+            if ( to == false ) {
+                // have to delete the edge that exists with
+                // probability eprob
+                return make_tuple( eprob*dc, "b-" );
+            }
+        }
+
+    }
+
     selfCostMapT getSelfLoopCostDict ( double cc, double dc, bool directed ) {
         auto undirected = ! directed;
         auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
@@ -187,6 +280,30 @@ namespace MultiOpt {
         selfLoopCostDict[ both ][ false ] = make_tuple( dc, "b-" );
         return selfLoopCostDict;
     }
+
+
+    selfCostMapFunT getSelfLoopCostFunDict ( double cc, double dc, bool directed ) {
+        auto undirected = ! directed;
+        auto none = make_tuple(false,false); auto fw = make_tuple(true,false);
+        auto rev = make_tuple(false,true); auto both = make_tuple(true,true);
+
+        selfCostMapFunT selfLoopCostDict;
+        selfLoopCostDict[ none ][ true ] = [=] (const double& p) { return make_tuple( p*cc, "b+" ); };
+        selfLoopCostDict[ none ][ false ] = [=] (const double& p) { return make_tuple( 0, "n" ); };
+
+        selfLoopCostDict[ rev ][ true ] = [=] (const double& p) { return make_tuple( (1.0-p)*dc, "n" ); };
+        selfLoopCostDict[ rev ][ false ] = [=] (const double& p) { return make_tuple( p*dc, "b-" ); };
+
+        selfLoopCostDict[ fw ][ true ] = [=] (const double& p) { return make_tuple( (1.0-p)*dc, "n" ); };
+        selfLoopCostDict[ fw ][ false ] = [=] (const double& p) { return make_tuple( p*dc, "b-" ); };
+
+        selfLoopCostDict[ both ][ true ] = [=] (const double& p) { return make_tuple( (1.0-p)*dc, "n" ); };
+        selfLoopCostDict[ both ][ false ] = [=] (const double& p) { return make_tuple( p*dc, "b-" ); };
+        return selfLoopCostDict;
+    }
+
+
+
 
     string flipType( const FlipKey& hvert, const FlipKey& tvert ){
         return flipDict[ make_tuple(hvert.f(), hvert.r())][ make_tuple(tvert.f(), tvert.r()) ];
@@ -408,6 +525,8 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
 
         auto costDict = getCostDict(cc,dc,directed);
         auto selfLoopCostDict = getSelfLoopCostDict(cc,dc,directed);
+        auto costFunDict = getCostFunDict(cc,dc,directed);
+        auto selfLoopCostFunDict = getSelfLoopCostFunDict(cc,dc,directed);
 
         auto N = H->order();
         auto M = H->size();
@@ -511,10 +630,19 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
                 //cout << " HN [" << T->getNodeName(u) << ", " << T->getNodeName(v) << ", (" << f << r << ")]\n";
                 if (u != v) {
                     auto d_f = hasEdge(u,v);
+                    double w_f = d_f ? G[edge(u,v,G).first].weight : 0.0;
                     auto d_r = hasEdge(v,u);
+                    double w_r = d_r ? G[edge(v,u,G).first].weight : 0.0;
+                    if ( undirected ) {
+                        assert( w_f == w_r );
+                    }
 
-                    auto costFlip = costDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ];
+                    //auto costFlip = costDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ];
+                    //auto costFlip2 = getCostFlip(cc, dc, directed, make_tuple(f,r), make_tuple(d_f,d_r), w_f);
+                    auto costFlip = costFunDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ](w_f, w_r);
+
                     auto cost = get<0>(costFlip); auto flip = get<1>(costFlip);
+
                     //cout << "cost = " << cost << ", flip = " <<
                     //flip;
                     Google<Derivation::flipT>::Set effectiveEdges;
@@ -526,7 +654,12 @@ cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
 
                 } else {
                     auto hasSelfLoop = hasEdge(u,v);
-                    auto costFlip = selfLoopCostDict[ make_tuple(f,r) ][ hasSelfLoop ];
+                    double w_l = hasSelfLoop ? G[edge(u,v,G).first].weight : 0.0;
+                    //hasSelfLoop = hasSelfLoop && (w_l >= 0.5);
+                    //auto costFlip = selfLoopCostDict[ make_tuple(f,r) ][ hasSelfLoop ];
+                    //auto costFlip2 = getSelfLoopCostFlip(cc,dc,directed, make_tuple(f,r), hasSelfLoop, w_l);
+                    auto costFlip = selfLoopCostFunDict[ make_tuple(f,r) ][ hasSelfLoop ]( w_l );
+
                     auto cost = get<0>(costFlip); auto flip = get<1>(costFlip);
                     Google<Derivation::flipT>::Set effectiveEdges;
                     effectiveEdges.set_empty_key( make_tuple(-1,-1,""));
