@@ -129,6 +129,8 @@ int main( int argc, char **argv ){
         ("target,t", po::value< string >(), "extant graph file")
         ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
         ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
+        ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
+        ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
         ;
 
     try {
@@ -136,12 +138,15 @@ int main( int argc, char **argv ){
         ap.parse_args( argc, argv );
         string treeName = ap["dupHist"].as<string>();
         string graphName = ap["target"].as<string>();
+        string outputName = ap["output"].as<string>();
 
         double creationCost = ap["ratio"].as<double>();
         double deletionCost = 1.0;
 
         bool undirected = ap.isPresent("undir");
         bool directed = !undirected;
+        size_t k = ap["numOpt"].as<size_t>();
+
         cout << "UNDIRECTED = " << undirected << "\n";
 
         auto newickReader = new Newick(true,true); //No comment allowed!
@@ -222,11 +227,15 @@ int main( int argc, char **argv ){
             // Count the # of opt slns.
             MultiOpt::countDictT countDict;
             countDict.set_empty_key(-1);
-            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict);
+            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName);
 
             cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
             cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";
-
+            cout << "Near optimal -- (cost, count) : \n";
+            for ( const auto& der : countDict[rootInd] ) {
+                cout << " (" << get<0>(der) << ",  " << get<1>(der) << ")\n";
+            }
+            cout << "\n";
             return 0;
 
 
