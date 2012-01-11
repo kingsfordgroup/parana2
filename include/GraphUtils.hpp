@@ -62,13 +62,13 @@ namespace GraphUtils {
                 getline( gfile, line, '\n' );
                 if ( gfile.eof() ) { break; }
                 boost::algorithm::trim(line);
-                cout << "LINE = " << line << "\n";
+                //cout << "LINE = " << line << "\n";
                 auto vline = line.substr( 0, line.find_first_of('#') );
                 splitVectorT splitVec;
                 split( splitVec, vline, is_any_of(" \t"), token_compress_on );
-                cout << "TOKENS " << "\n";
-                for_each( splitVec.begin(), splitVec.end(), [](const string& s){ cout << " " << s << "\n"; });
-                cout << "\n";
+                //cout << "TOKENS " << "\n";
+                //for_each( splitVec.begin(), splitVec.end(), [](const string& s){ cout << " " << s << "\n"; });
+                //cout << "\n";
 
                 if ( splitVec.size() > 0 ) {
                     auto fromVert = splitVec[0];
@@ -102,6 +102,8 @@ namespace GraphUtils {
                             G[e].weight = 1.0;
                         } );
                     //cout << "\n";
+                } else {
+                    cerr << "read comment line " << line;
                 }
 
             }
@@ -138,7 +140,7 @@ namespace GraphUtils {
 
                 splitVectorT splitVec;
                 split( splitVec, vline, is_any_of(" \t"), token_compress_on );
-                for_each( splitVec.begin(), splitVec.end(), [](const string& s){ cout << " " << s << "\n"; });
+                //for_each( splitVec.begin(), splitVec.end(), [](const string& s){ cout << " " << s << "\n"; });
 
                 if ( splitVec.size() > 0 ) {
                     auto fromVert = splitVec[0];
@@ -178,7 +180,7 @@ namespace GraphUtils {
                         Edge e; bool i;
                         boost::tie(e,i) = add_edge(u,v,G);
                         G[e].weight = weight;
-                        cerr << "added edge " << G[u].name << ", " << G[v].name << " : " << G[e].weight << "\n";
+                        //cerr << "added edge " << G[u].name << ", " << G[v].name << " : " << G[e].weight << "\n";
                         remEdgeLine--;
                     }
                 }

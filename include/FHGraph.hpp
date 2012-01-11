@@ -134,7 +134,11 @@ public:
         auto hind = _vBiMap.right.find(head)->second ;
 
         vector<size_t> tailInds; tailInds.reserve(tail.size());
-        for( auto t : tail ) { tailInds.push_back( _vBiMap.right.find(t)->second ); }
+        for( auto t : tail ) {
+            auto v = _vBiMap.right.find(t);
+            if ( v == _vBiMap.right.end() ) { return false; }
+            tailInds.push_back( v->second );
+        }
         sort( tailInds.begin(), tailInds.end() );
 
         HyperEdge edge(tailInds, hind, weight);

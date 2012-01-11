@@ -21,6 +21,7 @@
 
 /** Bio++ **/
 #include <Bpp/Phyl/Io/Newick.h>
+#include <Bpp/Phyl/Io/NexusIOTree.h>
 #include <Bpp/Phyl/Tree.h>
 #include <Bpp/Exceptions.h>
 
@@ -55,6 +56,7 @@ using std::unordered_map;
 using std::unordered_set;
 using std::set;
 using bpp::Newick;
+using bpp::NexusIOTree;
 using bpp::Tree;
 using bpp::Exception;
 using boost::adjacency_list;
@@ -86,7 +88,13 @@ void prepareTree( Tree* t, TreeInfo& ti, int nid ) {
         auto fid = t->getFatherId(nid);
         auto parentDeathT = get<1>(ti.extantInterval[fid]);
         assert ( ti.extantInterval.find(fid) != ti.extantInterval.end() );
-        ti.extantInterval[ nid ] = make_tuple( parentDeathT, parentDeathT + t->getDistanceToFather(nid) );
+        double fdist = 0.0;
+        if ( t->isLeaf(nid) ) {
+            fdist = std::numeric_limits<double>::infinity();
+        } else if ( t->hasDistanceToFather(nid) ) {
+            fdist = t->getDistanceToFather(nid);
+        }
+        ti.extantInterval[ nid ] = make_tuple( parentDeathT, parentDeathT + fdist );
     }
 
 
@@ -131,6 +139,7 @@ int main( int argc, char **argv ){
         ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
         ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
         ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
+        ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
         ;
 
     try {
@@ -140,6 +149,7 @@ int main( int argc, char **argv ){
         string graphName = ap["target"].as<string>();
         string outputName = ap["output"].as<string>();
 
+        double penalty = ap["timePenalty"].as<double>();
         double creationCost = ap["ratio"].as<double>();
         double deletionCost = 1.0;
 
@@ -152,9 +162,13 @@ int main( int argc, char **argv ){
         auto newickReader = new Newick(true,true); //No comment allowed!
         newickReader->enableExtendedBootstrapProperty("name");
         try {
-            auto tree = newickReader->read(treeName); // Tree in file
-            // MyTestTree.dnd
-
+            auto nexusReader = new NexusIOTree();
+            bpp::TreeTemplate<bpp::Node>* tree;
+            try {
+                tree = newickReader->read(treeName); // Tree in file
+            } catch ( const exception &e ) {
+                cerr << "ERROR READING TREE " << e.what();
+            }
             cout << "Tree has " << tree->getNumberOfNodes() << " nodes." << endl;
             //auto rootId = tree->getRootId();
 
@@ -165,6 +179,8 @@ int main( int argc, char **argv ){
                 }
             }
 
+            // cout how many branches had length 0
+            /*
             int zcount = 0;
             for ( auto n : tree->getNodesId() ) {
                 if ( n != tree->getRootId() ) {
@@ -174,10 +190,13 @@ int main( int argc, char **argv ){
                 }
             } cout << "\n";
             cout << zcount << " branches had length 0\n";
+            */
             TreeInfo tinfo("TreeInfo");
             auto rId = tree->getRootId();
-            tinfo.extantInterval[ rId ] = make_tuple( 0.0, 0.0 );
+            tinfo.extantInterval[ rId ] = make_tuple( -std::numeric_limits<double>::infinity(), 0.0 );
             prepareTree( tree, tinfo, rId );
+
+            // print out the existence intervals for all of the nodes
 
             for ( auto nid : tree->getNodesId() ){
                 auto nodeName = getName(tree,nid);
@@ -186,18 +205,32 @@ int main( int argc, char **argv ){
             }
 
 
+
             unordered_map<string, int> leafIDMap;
             for( auto nid : tree->getLeavesId() ) { leafIDMap[ getName(tree,nid) ] = nid; }
+
+            auto isAdjList = [&](){
+                auto spos = graphName.find_last_of(".");
+                auto suffix(graphName.substr( spos ));
+                return suffix == ".adj";
+            }();
 
             typedef adjacency_list<boost::hash_setS, vecS, boost::directedS, GraphUtils::Node, GraphUtils::Edge > directedGraphT;
             typedef adjacency_list<boost::hash_setS, vecS, boost::undirectedS, GraphUtils::Node, GraphUtils::Edge > undirectedGraphT;
             variant< directedGraphT, undirectedGraphT > G;
             if ( undirected ) {
                 G = undirectedGraphT();
-                GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<undirectedGraphT>(G) );
+                if ( isAdjList ) {
+                    GraphUtils::readFromAdjacencyList( graphName, leafIDMap, get<undirectedGraphT>(G) );
+                } else {
+                    GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<undirectedGraphT>(G) );
+                }
+
+                /*
                 auto vp = vertices(get<undirectedGraphT>(G));
                 size_t i = 0;
-                for( auto it = vp.first; it != vp.second; ++it ) { cout << "Vertex " << *it << ", name =  " << get<undirectedGraphT>(G)[*it].name << " # " << i << "\n"; ++i; }
+                for( auto it = vp.first; it != vp.second; ++it ) {cout << "Vertex " << *it << ", name =  " << get<undirectedGraphT>(G)[*it].name << " # " << i << "\n"; ++i; }
+                */
             } else {
                 G = directedGraphT();
                 GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<directedGraphT>(G) );
@@ -207,8 +240,8 @@ int main( int argc, char **argv ){
             //typedef graph_traits < graphT >::edge_descriptor
             //edgeDescT;
 
-            double penalty = 0.0;//std::numeric_limits<double>::infinity();
             auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
+
             vector<size_t> order; order.reserve( H->order() );
             MultiOpt::topologicalOrder( H, order );
 
@@ -229,38 +262,42 @@ int main( int argc, char **argv ){
             countDict.set_empty_key(-1);
             MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName);
 
-            cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
-            cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";
-            cout << "Near optimal -- (cost, count) : \n";
-            for ( const auto& der : countDict[rootInd] ) {
-                cout << " (" << get<0>(der) << ",  " << get<1>(der) << ")\n";
-            }
-            cout << "\n";
+            //cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
+            //cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";
+            //cout << "Near optimal -- (cost, count) : \n";
+            //for ( const auto& der : countDict[rootInd] ) {
+            //    cout << " (" << get<0>(der) << ",  " << get<1>(der) << ")\n";
+            //}
+            //cout << "\n";
             return 0;
 
 
             MultiOpt::viterbi( H, tree, tinfo, penalty, order, slnDict );
 
-            auto totalDerivs = 10;
+            auto totalDerivs = 1;
             auto derivNum = 0;
             double prevCost, newCost;
             prevCost = newCost = slnDict[ rootInd ][ derivNum ].cost;
             MultiOpt::initKBest();
 
-            while ( derivNum < totalDerivs || prevCost == newCost ) {
+            while ( derivNum < totalDerivs && prevCost == newCost ) {
                 MultiOpt::lazyKthBest( H, tinfo, penalty, slnDict, rootInd, derivNum, derivNum );
                 cerr << "returned from call to lazy" << derivNum << "best!!\n";
                 auto d = slnDict[ rootInd ][ derivNum ];
                 cout << "DERIVATION # " << derivNum << ": for [(" << tree->getNodeName(rootKey.u()) << ", " << tree->getNodeName(rootKey.v()) <<  ") : (" << rootKey.f() << rootKey.r() << ")] (" << d.cost << ")\n";
 
                 string fname = "outputDir/output.txt." + lexical_cast<string>(derivNum);
-                std::fstream output( fname, std::fstream::in | std::fstream::out | std::fstream::app );
-                //output.seekp( 0 );
-                for ( auto f : d.flips ) {
-                    cout << " [ " << tree->getNodeName(get<0>(f)) << ", " << tree->getNodeName(get<1>(f)) << " : " << get<2>(f) <<  "]\n";
-                    output << tree->getNodeName(get<0>(f)) << "\t" << tree->getNodeName(get<1>(f)) << "\t" << get<2>(f).substr(0,1) << "\n";
+                std::ofstream output( fname, std::ios::out | std::ios::app );
+                if ( output.is_open() ) {
+                    //output.seekp( 0 );
+                    for ( auto f : d.flips ) {
+                        cout << " [ " << tree->getNodeName(get<0>(f)) << ", " << tree->getNodeName(get<1>(f)) << " : " << get<2>(f) <<  "]\n";
+                        output << tree->getNodeName(get<0>(f)) << "\t" << tree->getNodeName(get<1>(f)) << "\t" << get<2>(f).substr(0,1) << "\n";
+                    }
+                    output.close();
+                } else {
+                    throw std::runtime_error("could not open file ("+fname+")");
                 }
-                output.close();
 
                 prevCost = newCost;
                 newCost = d.cost;
@@ -269,8 +306,8 @@ int main( int argc, char **argv ){
             }
 
             delete tree;
-        } catch (Exception e) {
-            cout << "Error when reading tree." << endl;
+        } catch (const Exception &e) {
+            cout << "Error when reading tree : " << e.what() << endl;
         }
         delete newickReader;
 

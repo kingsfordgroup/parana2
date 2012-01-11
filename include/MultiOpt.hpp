@@ -23,6 +23,9 @@
 #include <cln/float_io.h>
 #include <limits>
 #include <sstream>
+#include <exception>
+#include <sstream>
+#include "mpreal.h"
 
 /** Google's dense hash set and hash map **/
 #include <google/dense_hash_set>
@@ -93,7 +96,8 @@ namespace MultiOpt {
     using Utils::differentExtantNetworks;
     using boost::assign::map_list_of;
     using std::unique_ptr;
-
+    using std::ostringstream;
+    using mpfr::mpreal;
 
     template< typename T1, typename T2=std::nullptr_t >
     struct Std{
@@ -192,7 +196,7 @@ namespace MultiOpt {
         costDict[ fw ][ rev ] = [=](const double& pf, const double& pr) { return make_tuple( pf*dc + pr*cc, "f-r+"); };
         costDict[ fw ][ both ] = [=](const double& pf, const double& pr) { return make_tuple( (1.0-pf)*dc + pr*cc, "r+"); };
 
-        costDict[ both ][ none ] = [=](const double& pf, const double& pr) { return make_tuple( undirected ? pf*dc : (pf+pr)*dc, "b-" ); };
+        costDict[ both ][ none ] = [=](const double& pf, const double& pr) { return make_tuple( undirected ? (1.0-pf)*dc : (pf+pr)*dc, "b-" ); }; // was pf*dc
         costDict[ both ][ fw ] = [=](const double& pf, const double& pr) { return make_tuple( (1.0-pf)*dc + pr*dc, "r-" ); };
         costDict[ both ][ rev ] = [=](const double& pf, const double& pr) { return make_tuple( pf*dc + (1.0-pr)*dc, "f-" ); };
         costDict[ both ][ both ] = [=](const double& pf, const double& pr) { return make_tuple( undirected ? (1.0-pf)*dc : (1.0-pf)*dc + (1.0-pr)*dc, "n" ); };
@@ -237,7 +241,7 @@ namespace MultiOpt {
         selfLoopCostDict[ fw ][ false ] = [=] (const double& p) { return make_tuple( p*dc, "b-" ); };
 
         selfLoopCostDict[ both ][ true ] = [=] (const double& p) { return make_tuple( (1.0-p)*dc, "n" ); };
-        selfLoopCostDict[ both ][ false ] = [=] (const double& p) { return make_tuple( p*dc, "b-" ); };
+        selfLoopCostDict[ both ][ false ] = [=] (const double& p) { return make_tuple( (1.0-p)*dc, "b-" ); }; // was p*dc
         return selfLoopCostDict;
     }
 
@@ -268,9 +272,25 @@ namespace MultiOpt {
         using boost::directedS;
 
         typedef adjacency_list<vecS, vecS, directedS> graphT;
-        graphT G;
+        graphT G( H->order() );
+
         projectToReversedGraph( H, G );
         boost::topological_sort(G, std::back_inserter(order));
+    }
+
+    /**
+     *  Compute the penalty for this edge to exist based on difference
+     *  between the existence intervals of the endpoints and the
+     *  penalty factor.
+     */
+    template <typename T>
+    double existencePenalty( const TreeInfo& ti, const T& vert, const double& penalty, const double& travWeight ) {
+        if ( travWeight > 0 ) {
+            if (ti.intervalDistance( vert.u(), vert.v() ) > 0.0) {
+                return penalty;// * ti.intervalDistance( vert.u(), vert.v() );
+            }
+        }
+        return 0.0;
     }
 
     unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( const Tree* t,
@@ -291,8 +311,9 @@ namespace MultiOpt {
         costMapT costMap( getCostDict(cc,dc,directed) );
         selfCostMapT selfLoopCostMap( getSelfLoopCostDict(cc,dc,directed) );
 
-        auto addIncomingHyperedge = [=,&costMap,&selfLoopCostMap,&slnSpaceGraph] (const FlipKey& k, const int& rnode, const int& onode ) {
+        auto addIncomingHyperedge = [=,&costMap,&selfLoopCostMap,&slnSpaceGraph,&penalty] (const FlipKey& k, const int& rnode, const int& onode ) {
             auto dirKey = k.getDirTuple();
+            double canonicalDerivCost = 0.0;
 
             // Self loop
             if (k.arity() == 1) {
@@ -328,8 +349,9 @@ namespace MultiOpt {
                     }
                     if ( noFlipEdge.size() > 0 ) { slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 ); }
                     if ( dualFlipEdge.size() > 0 ) {
-                        slnSpaceGraph->addEdge( dualFlipEdge, k,
-                                                get<0>(selfLoopCostMap[ make_tuple(k.f(), k.r()) ][ dualFlipLL.f() || dualFlipLL.r() ])  );
+                        auto w = get<0>(selfLoopCostMap[ make_tuple(k.f(), k.r()) ][ dualFlipLL.f() || dualFlipLL.r() ]);
+                        w += existencePenalty(ti, k, penalty, w);
+                        if ( std::isfinite(w) ) { slnSpaceGraph->addEdge( dualFlipEdge, k, w ); }
                     }
                 }
             } else {
@@ -337,9 +359,6 @@ namespace MultiOpt {
                     //cout << t->getNodeName(rnode) << " is INTERNAL\n";
                     // Get the children nodes
                     int LRN = t->getSonsId(rnode)[0]; int RRN = t->getSonsId(rnode)[1];
-
-                    double canonicalDerivCost = 0.0;
-                    // if ( rnode < onode ) { canonicalDerivCost = 1e-50; }
 
                     // This vertex has 2 incoming hyper edges
                     // 1 -- we don't flip the self-loop
@@ -362,7 +381,8 @@ namespace MultiOpt {
                     }
                     if ( dualFlip.size() > 0 ) {
                         auto w = get<0>(costMap[ make_tuple(k.f(),k.r()) ][ make_tuple(dualFlipL.f(), dualFlipL.r()) ]);//directed ? 2.0 : 1.0;//2.0 ? directed : 1.0;
-                        slnSpaceGraph->addEdge( dualFlip, k, w );
+                        w += existencePenalty(ti, k, penalty, w);
+                        if ( std::isfinite(w) ) { slnSpaceGraph->addEdge( dualFlip, k, w ); }
                     }
 
                     if ( directed ) {
@@ -372,7 +392,7 @@ namespace MultiOpt {
                         vector<FlipKey> fwFlip; vector<FlipKey> revFlip;
 
                         if ( !differentExtantNetworks(ti, LRN, onode) ) {
-                            fwFlip.push_back( fwFlipL ); revFlip.push_back( revFlipL );
+                           fwFlip.push_back( fwFlipL ); revFlip.push_back( revFlipL );
                         }
 
                         if ( !differentExtantNetworks(ti, RRN, onode) ) {
@@ -381,11 +401,13 @@ namespace MultiOpt {
 
                         if ( fwFlip.size() > 0 ) {
                             auto w = get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(fwFlipL.f(), fwFlipL.r()) ]);
-                            slnSpaceGraph->addEdge( fwFlip, k , w );
+                            w += existencePenalty(ti, k, penalty, w);
+                            if ( std::isfinite(w) ) { slnSpaceGraph->addEdge( fwFlip, k , w ); }
                         }
                         if ( revFlip.size() > 0 ) {
                             auto w = get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(revFlipL.f(), revFlipL.r()) ]);
-                            slnSpaceGraph->addEdge( revFlip, k, w );
+                            w += existencePenalty(ti, k, penalty, w);
+                            if ( std::isfinite(w) ) { slnSpaceGraph->addEdge( revFlip, k, w ); }
                         }
                     }
 
@@ -412,7 +434,12 @@ namespace MultiOpt {
                 if ( (u == v) ||
                      (!differentExtantNetworks(ti,u,v) &&
                       !(ti.inSubnodesOf(u,v) ||  ti.inSubnodesOf(v,u)) &&
-                      !(isLost(u) || isLost(v))) ) {
+                      !(isLost(u) || isLost(v)) )) {
+                    /*
+                       &&
+                      !(ti.intervalDistance(u,v) > 0.0)) ) {
+                    */
+
                     //cout << "HERE\n";
                     slnSpaceGraph->addVertex( FlipKey( u, v, false, false ) );
                     if ( ! t->isRoot(v) ) {
@@ -443,7 +470,6 @@ namespace MultiOpt {
         cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
         return slnSpaceGraph;
     }
-
 
 
     template< typename GT >
@@ -553,17 +579,23 @@ namespace MultiOpt {
                     EdgeT fedge, redge;
                     bool d_f, d_r;
                     tie(fedge, d_f) = edge(u,v,G);
-                    double w_f = d_f ? G[edge(u,v,G).first].weight : 0.0;
+                    double w_f = d_f ? G[fedge].weight : 0.0;
                     tie(redge, d_r) = edge(v,u,G);
-                    double w_r = d_r ? G[edge(v,u,G).first].weight : 0.0;
+                    double w_r = d_r ? G[redge].weight : 0.0;
                     if ( undirected ) {
                         assert( w_f == w_r );
                     }
 
-                    //auto costFlip = costDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ];
-                    auto costFlip = costFunDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ](w_f, w_r);
-
-                    auto cost = get<0>(costFlip); auto flip = get<1>(costFlip);
+                    auto costFlip = costDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ];
+                    auto costFlipProb = costFunDict[ make_tuple(f,r) ][ make_tuple(d_f,d_r) ](w_f, w_r);
+                    /*
+                    if (costFlip != costFlipProb) {
+                        cerr << "whoops for transition (" << f << ", " << r << ") => (" << d_f << ", " << d_r << "), and (w_f, w_r) = (" << w_f << ", " << w_r << ")\n";
+                        cerr << "costFlip = (" << get<0>(costFlip) << ", " << get<1>(costFlip) << "), but costFlipProb = (" << get<0>(costFlipProb) << ", " << get<1>(costFlipProb) << ")\n";
+                        exit(1);
+                    }
+                    */
+                    auto cost = get<0>(costFlipProb); auto flip = get<1>(costFlipProb);
 
                     Google<Derivation::flipT>::Set effectiveEdges;
                     effectiveEdges.set_empty_key( make_tuple(-1,-1,""));
@@ -577,10 +609,17 @@ namespace MultiOpt {
                     tie(e, hasSelfLoop) = edge(u,v,G);
                     double w_l = hasSelfLoop ? G[edge(u,v,G).first].weight : 0.0;
 
-                    //auto costFlip = selfLoopCostDict[ make_tuple(f,r) ][ hasSelfLoop ];
-                    auto costFlip = selfLoopCostFunDict[ make_tuple(f,r) ][ hasSelfLoop ]( w_l );
+                    auto costFlip = selfLoopCostDict[ make_tuple(f,r) ][ hasSelfLoop ];
+                    auto costFlipProb = selfLoopCostFunDict[ make_tuple(f,r) ][ hasSelfLoop ]( w_l );
+                    /*
+                    if (costFlip != costFlipProb) {
+                        cerr << "whoops for self loop transition (" << f << ", " << r << ") => (" << hasSelfLoop << "), and (w_l) = (" << w_l << ")\n";
+                        cerr << "costFlip = (" << get<0>(costFlip) << ", " << get<1>(costFlip) << "), but costFlipProb = (" << get<0>(costFlipProb) << ", " << get<1>(costFlipProb) << ")\n";
+                        exit(1);
+                    }
+                    */
 
-                    auto cost = get<0>(costFlip); auto flip = get<1>(costFlip);
+                    auto cost = get<0>(costFlipProb); auto flip = get<1>(costFlipProb);
                     Google<Derivation::flipT>::Set effectiveEdges;
                     effectiveEdges.set_empty_key( make_tuple(-1,-1,""));
 
@@ -591,21 +630,6 @@ namespace MultiOpt {
                 } // ( u != v )
             } // ( lostU || lostV )
         } // loop over leaf hypernodes
-    }
-
-    /**
-     *  Compute the penalty for this edge to exist based on difference
-     *  between the existence intervals of the endpoints and the
-     *  penalty factor.
-     */
-    template <typename T>
-    double existencePenalty( TreeInfo& ti, const T& vert, const double& penalty ) {
-        if (vert.f() || vert.r()) {
-            if (ti.intervalDistance( vert.u(), vert.v() ) > 0.0) {
-                return penalty * ti.intervalDistance( vert.u(), vert.v() );
-            }
-        }
-        return 0.0;
     }
 
     typedef tuple<double, vector<size_t> > dvsT;
@@ -680,7 +704,7 @@ namespace MultiOpt {
 
 
     vector<cl_RA> computeAlphas( const vector<tuple<double, cl_I>>& slnVec ) {
-        vector<cl_RA> scores; scores.reserve(slnVec.size());
+        vector<cl_RA> scores;
         cl_RA invSum(0);
         cl_RA one(1);
         for (const auto& e : slnVec) {
@@ -696,29 +720,243 @@ namespace MultiOpt {
         return alphas;
     }
 
-    vector<double> computeAlphasDouble( const vector<tuple<double, cl_I>>& slnVec ) {
+
+    double estimateThermodynamicBeta( const vector<tuple<double, cl_I>>& slnVecIn, const double& emin ) {
+        if (slnVecIn.size() == 1) { return 0.0; }
+        vector< tuple<double, mpreal> > slnVec; slnVec.reserve(slnVecIn.size());
+        std::stringstream ss;
+        for ( const auto& e : slnVecIn ){
+            ss << get<1>(e);
+            mpreal n = ss.str();
+            ss.clear();
+            slnVec.push_back( make_tuple( get<0>(e), n ) );
+        }
+        double ctr = 0.0;
+        double beta = 0.0;
+        size_t n = slnVec.size();
+        double scale = 1.0 / ( n-1 );
+        for ( auto i = slnVec.begin(); (i+1) != slnVec.end(); ++i ) {
+            auto j = i+1;
+            auto lnI = mpfr::log( get<1>(*i) );
+            auto eI = get<0>(*i) - emin;
+            auto lnJ = mpfr::log( get<1>(*j) );
+            auto eJ = get<0>(*j) - emin;
+            double denom = (eJ-eI);
+
+            if ( denom >= 1.0 ) {
+                    beta += scale * ( (lnJ - lnI).toDouble() ) / denom;
+                    ctr += 1.0;
+            }
+        }
+
+        //beta /= ctr;
+        std::cerr << " ===== beta = " << beta << " ===== \n";
+        return beta;
+    }
+
+    vector<double> computeAlphasDouble( const vector<tuple<double, cl_I>>& slnVec, size_t k, const cl_I& total ) {
         vector<double> scores; scores.reserve(slnVec.size());
         double bestScore = get<0>(slnVec.front());
         double worstScore = get<0>(slnVec.back());
-        double diff = std::max(1.0, worstScore - bestScore);
-        double scale = 40. / diff;
-        double invSum(0);
-        //cl_RA one(1);
+        if ( bestScore == worstScore && slnVec.size() > 1 ) {
+            cerr << "bestScore (" << bestScore << ") == worstScore (" << worstScore << ")" << "\n";
+            cerr << "=== slnVec ===\n";
+            for (const auto& e : slnVec) {
+                cerr << "score = " << get<0>(e) << ", count = " << get<1>(e) << "\n";
+            }
+            std::abort();
+        }
+        double diff = worstScore == bestScore ? 1.0 : worstScore - bestScore; // std::max(0.01, worstScore - bestScore);
+        size_t N = slnVec.size();
+        /*
+        std::stringstream ss;
+        ss << get<1>(slnVec.front());
+        mpreal I = ss.str(); ss.clear();
+        ss << get<1>(slnVec.back());
+        mpreal J = ss.str(); ss.clear();
+        */
+        //double scale = (mpfr::log( J ) - mpfr::log( I )).toDouble() / diff;
+        //double scale = estimateThermodynamicBeta( slnVec, bestScore ); // (6.9*k) / diff; // (1.25 * k) / diff;
+
+
+        double scale = (0.5 * k) / diff;//(2.0 * N) / diff;//(1.5*k) / diff;
+        //std::cerr << " **** beta = " << scale << " **** \n";
+        double sum(0.0);
+
         for (const auto& e : slnVec) {
-            scores.push_back( std::exp( (bestScore-get<0>(e)) * (scale) ) );/// (diff*diff) ) );//1.0 /( get<0>(e)+1.0 ) );
-            invSum += scores.back();
+            double a = std::abs( (bestScore - get<0>(e)) * scale);
+            scores.push_back( std::exp( -(a*a) ) );
+            sum += scores.back();
+        }
+
+        double invSum = 1.0 / sum;
+        vector<double> alphas; alphas.reserve(slnVec.size());
+        for (const auto& s : scores) {
+            alphas.push_back( s * invSum );
+        }
+        return alphas;
+    }
+
+    vector<double> getAlphas( const vector< tuple<double, cl_I> >& slnVec, const cl_I& numPaths ) {
+        typedef tuple<double,cl_I> elemT;
+
+        auto minmax = std::minmax_element( slnVec.begin(), slnVec.end(), [] (const elemT& e0, const elemT& e1) { return get<0>(e0) < get<0>(e1); } );
+        double bestScore = get<0>(*(minmax.first));
+        double worstScore = get<0>(*(minmax.second));
+        double diff = std::max(1.0, worstScore - bestScore);
+        double scale = 2.0 / diff;
+        double totalWeight = 0.0;
+        double alpha = 0.0;
+        vector<double> invScores; invScores.reserve(slnVec.size());
+        for (const auto& e : slnVec) {
+            invScores.push_back( (alpha*double_approx(get<1>(e) / numPaths)) + ((1.0 - alpha) * std::exp( bestScore-get<0>(e) * scale ))  );
+            totalWeight += invScores.back();
         }
 
         vector<double> alphas; alphas.reserve(slnVec.size());
-        for (const auto& s : scores) {
-            alphas.push_back( s/invSum );
+        for (const auto& e : invScores ) {
+            alphas.push_back( e / totalWeight );
         }
         return alphas;
     }
 
 
 
-    void viterbiCount( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict, const size_t& k, const string& outputName ) {
+    void insideOutside( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict, const string& outputName ) {
+
+        // We'll use vectors for these since the nodes and vectors have a well
+        // defined ordering.
+        vector< tuple<double,cl_I> > insideScores( H->order() );
+        vector< tuple<double,cl_I> > edgeWeightMap( H->size() );
+
+        // Each leaf has a single solution which is, by definition, of optimal cost
+        for ( const auto& vit : order ) {
+            if ( H->incident(vit).size() == 0 ) {
+                insideScores[vit] = make_tuple(slnDict[vit][0].cost, cl_I(1));
+            } else {
+                insideScores[vit] = make_tuple(0.0, cl_I(0));
+            }
+        }
+
+        for ( size_t i = 0; i < H->size(); ++i ) {
+            edgeWeightMap[i] = make_tuple(0.0, cl_I(0));
+        }
+
+        size_t ctr = 0;
+        size_t tot = H->order();
+        // For each vertex, in topological order (inside)
+        for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr ) {
+            cerr << "\r\rprocessing node " << ctr << "/" << tot;
+            vector< tuple<double, cl_I> > scores; scores.reserve( H->incident(*vit).size() );
+            if ( H->incident(*vit).size() > 0 ) { // For every non-leaf
+                cl_I totalPaths(1);
+                // loop over all incoming edges
+                for ( const auto& e : H->incident(*vit) ) {
+
+                    auto tail = H->getTail(e);
+                    vector< tuple<double, cl_I> > tailScores; tailScores.reserve( tail.size() );
+
+                    cl_I numPaths(1);
+                    cl_I summedNumPaths(0);
+                    // Loop over all tail vertices
+                    for ( const auto& tind : tail ) {
+                        tailScores.push_back( insideScores[tind] );
+                        numPaths *= get<1>(insideScores[tind]);
+                        summedNumPaths += get<1>(insideScores[tind]);
+                        cerr << "tailNode # paths = " << get<1>(insideScores[tind]) << "\n";
+                    }
+                    cerr << "summedNumPaths = " << summedNumPaths << "\n";
+                    totalPaths += numPaths;
+                    double avgTailCost = 0.0;
+                    size_t tind = 0;
+                    vector<double> talphas(getAlphas(tailScores,summedNumPaths));
+                    for (const auto& s : tailScores ) {
+                        //cerr << "(score, frac) = " << get<0>(s) << ", (" << talphas[tind] << ")\n";
+                        avgTailCost += get<0>(s);// * (1.0 / tailScores.size());//talphas[tind];
+                        tind += 1;
+                    }
+                    //if (std::isnan(avgTailCost) || ctr > 200 ) { std::abort(); }
+                    scores.push_back( make_tuple( H->edge(e).weight() + avgTailCost , numPaths ) );
+                }
+
+                double avgHeadScore = 0.0;
+                for (const auto& s : scores ) {
+                    avgHeadScore += get<0>(s) * 1.0 / scores.size();//double_approx( get<1>(s) / totalPaths );
+                }
+
+                vector<double> contribWeights(getAlphas(scores,totalPaths));
+                insideScores[*vit] = make_tuple(avgHeadScore, totalPaths);
+
+                // once we know the score of the parent node, we can
+                // compute the relative contribution from each incoming edge
+                size_t eind = 0;
+                for ( const auto& e : H->incident(*vit) ) {
+                    edgeWeightMap[ e ] = make_tuple(contribWeights[eind], get<1>(scores[eind]));
+                    ++eind;
+                }
+            }
+        }
+
+        typedef Google< size_t, double >::Map probMapT;
+
+        auto getOrElse = [] ( probMapT& pm, const size_t& key, double alt ) {
+            return (pm.find(key) == pm.end()) ? alt : pm[key];
+        };
+
+        probMapT probMap;
+        probMap.set_empty_key( std::numeric_limits<size_t>::max() );
+
+        FlipKey rootKey( t->getRootId(), t->getRootId(), false, false);
+        auto rootInd = H->index(rootKey);
+        // The root gets a probability of 1
+        probMap[rootInd] = 1.0;
+
+        ctr = 0;
+        // Loop over all vertices in reverse topological order
+        for ( auto vit = order.rbegin(); vit != order.rend(); ++vit, ++ctr ) {
+            cerr << "\r\rprocessing node " << ctr << "/" << tot;
+
+            auto key = H->vertex(*vit);
+            auto parentProb = probMap[*vit];
+
+            for ( const auto& e : H->incident(*vit) ) {
+                auto condProb = get<0>(edgeWeightMap[e]);
+                // for all tail vertices of this edge
+                auto tail = H->getTail(e);
+                for ( const auto& tind : tail ) {
+                    probMap[tind] += (parentProb * condProb);
+                }
+            }
+        }
+
+        string fname = outputName;
+        std::fstream output( fname, std::fstream::out | std::fstream::trunc );
+
+        for ( auto vit = order.rbegin(); vit != order.rend(); ++vit ) {
+            auto key = H->vertex(*vit);
+            auto approxProb = probMap[*vit];//double_approx(probMap[*vit]);
+            auto fs = flipStrMap[key.getDirTuple()];
+            if ( approxProb > 0.0 && fs != "n" ) {
+                output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
+                       << "\t" << fs << "\t" << approxProb << "\n";
+
+            }
+        }
+        output.close();
+        std::cerr << "\n";
+
+
+
+    }
+
+    FlipKey keyForAction( const FlipKey& fk , const string& ft ) {
+        if ( ft == "n" ) { return fk; }
+        if ( ft == "b+" || ft == "b-" ) { return flipBoth(fk); }
+        if ( ft == "f+" || ft == "f-" ) { return flipForward(fk); }
+        if ( ft == "r+" || ft == "r-" ) { return flipReverse(fk); }
+    }
+
+      void viterbiCount( unique_ptr<ForwardHypergraph>& H, Tree* t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict, const size_t& k, const string& outputName ) {
 
         // Compute the *weighted* probability of each edge being in
         // the top k distinct scoring solutions
@@ -728,9 +966,10 @@ namespace MultiOpt {
             if ( H->incident(vit).size() == 0 ) {countDict[vit].push_back( make_tuple(slnDict[vit][0].cost, cl_I(1)) );}
         }
 
+        typedef size_t edgeIdT;
         // For each edge, count the number of solutions having each score
-        unordered_map< size_t, unordered_map< double, cl_I > > edgeCountMap;
-        unordered_map< size_t, unordered_map< double, double > > edgeProbMap;
+        unordered_map< edgeIdT, unordered_map< double, cl_I > > edgeCountMap;
+        unordered_map< edgeIdT, unordered_map< double, double > > edgeProbMap;
 
         // A map holding which edges are used to obtain *an* optimal
         // solution for each vertex
@@ -740,30 +979,28 @@ namespace MultiOpt {
         auto N = H->order();
         size_t ctr=0;
 
-        // For each vertex, in topological order (backward)
+        // For each vertex, in topological order (inside)
         for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr ) {
             cerr << "\r\rProcessed " << 100.0*(static_cast<float>(ctr)/N) << "% of the vertices";
             auto vert = H->vertex(*vit);
 
-            // The cost for deriving this vertex that a new derivation has to beat
-            double cval = ( slnDict.find(*vit) == slnDict.end() ) ? std::numeric_limits<double>::max() : slnDict[*vit][0].cost;
-
+            // Put the results in an ordered map -- the sorted
+            // property will be useful later for maintaining only the
+            // k-best score classes
             map< double, vector<tuple<size_t,cl_I> > > edgeCostMap;
-            // Soft constraint for edge existence
-            auto ePen = existencePenalty(ti, vert, penalty);
+
 
             // loop over all incoming edges and compute the # of
             // solutions over each edge as well as that solution's cost
             for ( const auto& e : H->incident(*vit) ) {
+
                 auto edge = H->edge(e);
                 auto hind = edge.head();
                 auto w = edge.weight();
+
                 auto tvert = H->vertex(edge.tail()[0]);
 
-                auto tval = ePen + w;
-                cl_I numEdgeSln(1);
-
-                auto currentEdgeSlns = countEdgeSolutions( tval, edge.tail(), countDict, k );
+                auto currentEdgeSlns = countEdgeSolutions( w, edge.tail(), countDict, k );
 
                 for ( const auto& ent : currentEdgeSlns ) {
                     double score; cl_I count;
@@ -772,50 +1009,64 @@ namespace MultiOpt {
                     auto edgeContrib = make_tuple(e, count);
 
                     if ( insertIt == edgeCostMap.end() ) {
-                        vector< tuple<size_t, cl_I > > r(1, edgeContrib);
-                        edgeCostMap[ score ] = r;
+                        edgeCostMap[ score ] = { edgeContrib };
                     } else {
                         insertIt->second.push_back( edgeContrib );
                     }
                     edgeCountMap[ e ][ score ] = count;
                 }
             }
-            // If we traversed any optimal edges
-            if ( edgeCostMap.size() > 0 ) { //edgeCosts.size() > 0 ) {
-                //cerr << "AM I CRAZY?\n";
+            // If we traversed any edges
+            if ( edgeCostMap.size() > 0 ) {
                 typedef tuple<double, cl_I, size_t> edgeSlnT;
                 double minCost = std::numeric_limits<double>::max();
                 size_t mk = std::min( edgeCostMap.size(), k );
                 size_t ctr = 0;
 
+                // for all incoming score classes
                 for ( auto cmIt = edgeCostMap.begin(); cmIt != edgeCostMap.end() && ctr < mk; ++cmIt, ++ctr ) {
+                    // the score
                     auto score = cmIt->first;
-                    //cerr << "ctr = " << ctr << ", score = " << score << "\n";
+                    // the set of edges providing this score
                     const auto& providingEdges = cmIt->second;
+                    // the minimum cost incoming score
                     minCost = std::min(minCost, score);
+                    // will count the number of solutions in this
+                    // score class
                     cl_I numSln(0);
+
+                    // Update the information at the derived vertices
                     for ( const auto& edgeCount : providingEdges ) {
                         size_t edgeInd; cl_I count;
                         tie(edgeInd, count) = edgeCount;
+
+                        // Add this edge to the set of used edges for
+                        // the derived vertex for the given score class.
                         if ( usedEdges[*vit].find(score) == usedEdges[*vit].end() ) {
                             usedEdges[*vit][score] = { edgeInd };
                         } else {
                             usedEdges[*vit][score].insert( edgeInd );
                         }
+                        // update the total number of solutions of the
+                        // derived vertex
                         numSln += count;
                     }
+                    // There are 'numSln' derivations yielding *vit at
+                    // a score of 'score'
                     countDict[*vit].push_back( make_tuple(score, numSln) );
 
+                    // Now that we have a total count for the derived
+                    // vertex, compute each edge's contribution
                     for ( const auto& edgeCount : providingEdges ) {
                         size_t edgeInd; cl_I count;
                         tie(edgeInd, count) = edgeCount;
                         double edgeProb = double_approx( count / numSln );
+                        // The probability of traversing this edge for
+                        // derivations with the given score
                         edgeProbMap[edgeInd][score] = edgeProb;
                     }
 
                 }
-
-
 
                 // Find the minimum cost edge
                 Google<Derivation::flipT>::Set fs;
@@ -837,43 +1088,82 @@ namespace MultiOpt {
         cerr << "Backward step \n";
 
         probMapT probMap;
+        probMapT outProbMap;
         probMap.set_empty_key( std::numeric_limits<size_t>::max() );
+        outProbMap.set_empty_key( std::numeric_limits<size_t>::max() );
 
         FlipKey rootKey( t->getRootId(), t->getRootId(), false, false);
         auto rootInd = H->index(rootKey);
         // The root gets a probability of 1
-        probMap[rootInd] = 1.0;//cl_RA(1);
-        //probMap[rootInd] = cl_RA(1);
+        probMap[rootInd] = 1.0;
+        outProbMap[rootInd] = 1.0;
 
         ctr = 0;
         size_t tot = order.size();
 
-        // Compute the probabilities (forward)
+        // Compute the probabilities (outside)
         // Loop over all vertices in reverse topological order
         for ( auto vit = order.rbegin(); vit != order.rend(); ++vit, ++ctr ) {
             cerr << "\r\rprocessing node " << ctr << "/" << tot;
-
+            // The current vertex and it's probability
             auto key = H->vertex(*vit);
             auto parentProb = probMap[*vit];
 
-            auto alphas = computeAlphasDouble( countDict[*vit] );
+            // The total # of derivations of this vertex (over all
+            // considered score classes)
+            cl_I total(0);
+            for ( size_t i = 0; i < countDict[*vit].size(); ++i ) { total += get<1>(countDict[*vit][i]); }
 
-            // for each top-k score at this node
+            // Compute the weights for each of the score classes
+            // considered at this node
+            auto alphas = computeAlphasDouble( countDict[*vit], k, total );
+
+            // for each top-k score class
             for ( size_t i = 0; i < countDict[*vit].size(); ++i ) {
                 double pScore; cl_I pCount;
+                // The score and it's count
                 tie(pScore, pCount) = countDict[*vit][i];
 
+                double tprob = 0.0;
                 // for all incoming edges contributing to this score
                 for ( const auto& e : usedEdges[*vit][pScore] ) {
-                    auto condProb = edgeProbMap[e][pScore];//cl_RA(edgeCountMap[e][pScore] / pCount);
-                    // for all tail vertices of this edge
+                    // The conditional probability of taking edge 'e'
+                    // given than we're deriving vertex *vit at score 'pScore'
+                    auto condProb = edgeProbMap[e][pScore];
+                    tprob += condProb;
                     auto tail = H->getTail(e);
+
+                    auto ft = flipType( H->vertex(*vit), H->vertex(tail[0]) );
+                    auto outKey = keyForAction( H->vertex(*vit), ft );
+                    auto outInd = H->index(outKey);
+                    outProbMap[outInd] += ( parentProb * (alphas[i] * condProb));
+
+                    // for all tail vertices of this edge
                     for ( const auto& tind : tail ) {
-                        //auto currentProb = getOrElse( probMap, tind, cl_RA(0) );
+                        // For each vertex in the tail of e, it gets
+                        // probability mass for deriving *vit
+                        // proportional to e's contribution
                         probMap[tind] += (parentProb * ( alphas[i] * condProb ));
+                        //outProbMap[tind] += (parentProb * ( alphas[i] * condProb ));
                     }
                 }
+
+                #ifdef DEBUG
+                if ( usedEdges[*vit][pScore].size() > 0 && std::abs(tprob - 1.0) > 1e-4 ) {
+                    cerr << "ERROR : \n";
+                    cerr << "cond. probs from [" << t->getNodeName(key.u()) << ", " << t->getNodeName(key.v()) << "] (" << key.f() << ", " << key.r() << ")\n";
+                    cerr << "score = " << pScore << ", count = " << pCount << ", tprob = " << tprob << "\n";
+                    exit(1);
+                }
+                #endif
             }
+        }
+
+
+        size_t i = 0;
+        for ( const auto& sc : countDict[rootInd] ) {
+            cout << "score class " << i << " has " << get<1>(sc) << " solutions of score  " << get<0>(sc) << "\n";
+            ++i;
         }
 
         string fname = outputName;
@@ -881,12 +1171,83 @@ namespace MultiOpt {
 
         for ( auto vit = order.rbegin(); vit != order.rend(); ++vit ) {
             auto key = H->vertex(*vit);
-            auto approxProb = probMap[*vit];//double_approx(probMap[*vit]);
-            auto fs = flipStrMap[key.getDirTuple()];
-            if ( approxProb > 0.0 && fs != "n" ) {
-                output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
-                       << "\t" << fs << "\t" << approxProb << "\n";
 
+            if ( H->incident(*vit).size() == 0 ) {
+                if ( outProbMap[*vit] != probMap[*vit] && outProbMap[*vit] > probMap[*vit] ) {
+                    cout << "inProbMap has " << probMap[*vit] << ", outProbMap has" << outProbMap[*vit] << "\n";
+                }
+                outProbMap[*vit] = probMap[*vit];
+            }
+
+            auto approxInProb = probMap[*vit];
+            auto approxProb = outProbMap[*vit];
+
+            // ====================
+            /*
+            auto vert = H->vertex(*vit);
+            std::string from, to;
+            cout << "v = [" << t->getNodeName(vert.u()) << ", " << t->getNodeName(vert.v()) << "] (" << vert.f() << ", " << vert.r() << "), inProb = " << approxInProb << "\n";
+            if ( !t->isLeaf(vert.u()) ) {
+                auto rnode = vert.u();
+                int LRN = t->getSonsId(rnode)[0]; int RRN = t->getSonsId(rnode)[1];
+                cout << "children of " << t->getNodeName(vert.u()) << " are " << t->getNodeName(LRN) << " and " << t->getNodeName(RRN) << "\n";
+            }
+
+            if ( !t->isLeaf(vert.v()) ) {
+                auto rnode = vert.v();
+                int LRN = t->getSonsId(rnode)[0]; int RRN = t->getSonsId(rnode)[1];
+                cout << "children of " << t->getNodeName(vert.v()) << " are " << t->getNodeName(LRN) << " and " << t->getNodeName(RRN) << "\n";
+
+            }
+
+            cout << "actions\n";
+            auto parentProb = probMap[*vit];
+
+            size_t tne = 0;
+            // The total # of derivations of this vertex (over all
+            // considered score classes)
+            cl_I total(0);
+            for ( size_t i = 0; i < countDict[*vit].size(); ++i ) { total += get<1>(countDict[*vit][i]); }
+
+            // Compute the weights for each of the score classes
+            // considered at this node
+            auto alphas = computeAlphasDouble( countDict[*vit], k, total );
+
+
+            // for each top-k score class
+            for ( size_t i = 0; i < countDict[*vit].size(); ++i ) {
+                double pScore; cl_I pCount;
+                // The score and it's count
+                tie(pScore, pCount) = countDict[*vit][i];
+
+                cout << "score class " << i << "\n";
+
+                double p = 0.0;
+                // for all incoming edges contributing to this score
+                for ( const auto& e : usedEdges[*vit][pScore] ) {
+                    // The conditional probability of taking edge 'e'
+                    // given than we're deriving vertex *vit at score 'pScore'
+                    auto condProb = edgeProbMap[e][pScore];
+                    auto prob = ( parentProb * (alphas[i] * condProb));
+                    auto tail = H->getTail(e);
+                    cout << "Action = " << flipType( key, H->vertex(tail[0])) << ", prob = " << prob << "\n";
+                    p += prob;
+                }
+                tne += usedEdges[*vit][pScore].size();
+                cout << "score = " << pScore << ", numEdges =  " << usedEdges[*vit][pScore].size() << ", prob = " << p << "\n";
+            }
+
+            cout << "total number of incoming edges = " << H->incident(*vit).size() << ", total num used edges = " << tne << ", ";
+            cout << "outProb = " << approxProb << "\n\n";
+            */
+            // ====================
+
+            if ( approxProb > 0.0  ) {
+                auto fs = flipStrMap[key.getDirTuple()];
+                if ( fs != "n" ) {
+                    output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
+                           << "\t" << fs << "\t" << approxProb << "\n";
+                }
             }
         }
         output.close();
@@ -910,21 +1271,11 @@ namespace MultiOpt {
 
             //    cout << "COST = " << cval << "\n";
 
-            auto existencePenalty = 0.0;
-            if (vert.f() || vert.r()) {
-                if (ti.intervalDistance( vert.u(), vert.v() ) > 0.0) {
-                    existencePenalty = penalty * ti.intervalDistance( vert.u(), vert.v() );
-                }
-            }
-
             for ( auto& e : H->incident(*vit) ) {
                 auto edge = H->edge(e);
                 auto hind = edge.head();
                 auto w = edge.weight();
                 auto tvert = H->vertex(edge.tail()[0]);
-
-                //if ( w > 0 ) { cout << "WEIGHt > 0 "; }
-                auto tval = w;
 
                 Google<Derivation::flipT>::Set flips;
                 flips.set_empty_key( make_tuple(-1,-1,""));
@@ -932,7 +1283,7 @@ namespace MultiOpt {
                 string children;
                 for ( auto tn : edge.tail() ){
                     auto cvert = H->vertex(tn);
-                    tval += slnDict[tn][0].cost;
+                    w += slnDict[tn][0].cost;
                     /*std::set_union( slnDict[tn][0].flips.begin(), slnDict[tn][0].flips.end(),
                                     slnDict[tn][0].flips.begin(), slnDict[tn][0].flips.end(),
                                     std::inserter( flips, flips.begin() ) );
@@ -945,11 +1296,11 @@ namespace MultiOpt {
                 auto ft = flipType(vert,tvert);
                 if ( ft != "n" ) { flips.insert( make_tuple(vert.u(), vert.v(), ft ) ); }
 
-                if (tval <= cval) {
+                if ( w <= cval) {
                     vector<size_t> bp( edge.tail().size(), 0 );
-                    slnDict[hind][0] = Derivation(tval, e, bp, flips);
+                    slnDict[hind][0] = Derivation(w, e, bp, flips);
                     //cout << " updated cost from " << cval << " -> " << tval << " " << ((w > 0) ? "by flipping and" : "") <<  " using " << children << "\n";
-                    cval = tval;
+                    cval = w;
                 }
             }
         }
@@ -989,21 +1340,14 @@ namespace MultiOpt {
         auto hvert = H->vertex(v);
         auto a = hvert.u(); auto b = hvert.v();
 
-        auto existencePenalty = 0.0;
-        if (hvert.f() || hvert.r()) {
-            if (ti.intervalDistance( a, b ) > 0.0) {
-                existencePenalty = penalty * ti.intervalDistance( a, b );
-            }
-        }
-
-
         // Initalize the heap with the 1-best solution for each incoming edge
         for ( auto e : incoming ) {
             // Compute the score of this derivation
             auto edge = H->edge(e);
-            auto w = existencePenalty + edge.weight();
+            auto w = edge.weight();
             auto tail = edge.tail();
-            // The DBP pointing to the 1-best solution of all of tail vertices of this edge
+
+           // The DBP pointing to the 1-best solution of all of tail vertices of this edge
             vector<size_t> j( tail.size(), 0);
             // A Tail vertex for this edge
             auto tvert = H->vertex( tail[0] );
@@ -1083,13 +1427,6 @@ namespace MultiOpt {
 
         auto ft = flipType(hvert, tvert);
 
-        auto existencePenalty = 0.0;
-        if (hvert.f() || hvert.r()) {
-            if (ti.intervalDistance( a, b ) > 0.0) {
-                existencePenalty = penalty * ti.intervalDistance( a, b );
-            }
-        }
-
         // For each tail node in this edge
         size_t i = 0;
         for ( auto vind : tail ) {
@@ -1118,7 +1455,7 @@ namespace MultiOpt {
                 // the children
 
                 auto w = edge.weight();
-                auto s = existencePenalty + w;
+                auto s = w;
                 Google<Derivation::flipT>::Set ed;
                 ed.set_empty_key( make_tuple(-1,-1,""));
                 //set<Derivation::flipT> ed;

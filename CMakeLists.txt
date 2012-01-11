@@ -7,7 +7,7 @@ Project( parana )
 
 SET(CMAKE_VERBOSE_MAKEFILE ON)
 
-SET( CMAKE_BUILD_TYPE Debug )
+SET( CMAKE_BUILD_TYPE Debug)
 SET( CMAKE_CXX_FLAGS "-O3 -std=gnu++0x ${CMAKE_CXX_FLAGS}")
 
 

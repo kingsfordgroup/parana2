@@ -66,6 +66,18 @@ namespace Utils {
             return false;
         };
 
+         for (size_t i = 0; i < inds.size(); ++i) {
+            vector<size_t> newInds(inds);
+            newInds[i]++;
+            if ( newInds[i] < sizes[i] ) {
+                pq.push_back( make_tuple( computeScore(newInds), newInds ) );
+                std::push_heap( pq.begin(), pq.end(), pqComp );
+            }
+            if (inds[i] != 1) {
+                break;
+            }
+         }
+            /*
         for (size_t i = 0; i < inds.size(); ++i) {
             vector<size_t> newInds(inds);
             newInds[i]++;
@@ -77,6 +89,7 @@ namespace Utils {
                 }
             }
         }
+            */
         return true;
     }
 
@@ -110,20 +123,20 @@ namespace Utils {
             auto birthV = get<0>( extantInterval[v] );
             auto deathV = get<1>( extantInterval[v] );
             // If the ranges overlap, the distance is 0
-            if ( (birthU <= deathV) && (deathU >= birthV) ) { return 0.0; }
+            if ( (birthU <= deathV) && (birthV <= deathU) ) { return 0.0; }
             // otherwise
-            if ( birthU >= deathV ) {
+            if ( birthU > deathV ) {
                 return birthU - deathV;
             }
 
-            if ( birthV >= deathU ) {
+            if ( birthV > deathU ) {
                 return birthV - deathU;
             }
         }
-        /*
-        double intervalDistance( int u, int v ) {
-            return static_cast<const TreeInfo&>(*this).intervalDistance(u,v);
-            }*/
+
+        double intervalDistance( int u, int v ) const {
+            return const_cast<TreeInfo&>(*this).intervalDistance(u,v);
+        }
     };
 
 
