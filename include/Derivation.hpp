@@ -3,6 +3,7 @@
 
 #include <tuple>
 #include <vector>
+#include <iostream>
 #include <unordered_set>
 #include <boost/lexical_cast.hpp>
 #include <boost/functional/hash.hpp>
@@ -14,7 +15,8 @@ using std::tuple;
 using std::unordered_set;
 using std::get;
 using std::vector;
-
+using std::string;
+using std::make_tuple;
 using boost::lexical_cast;
 
 namespace std {
@@ -41,20 +43,6 @@ public:
     vector<size_t> bp;
     dense_hash_set<flipT,std::hash<flipT>> flips;
 
-    friend ostream& operator<<(ostream& output, const Derivation& d) {
-        string bpStr;
-        for ( auto t : d.bp ) {
-            bpStr += lexical_cast<string>(t) + " ";
-        }
-        string flipStr;
-        for ( auto f : d.flips ) {
-            flipStr += "[" +lexical_cast<string>(get<0>(f)) + ", " + lexical_cast<string>(get<1>(f)) + " : " + get<2>(f) + "] ";
-        }
-        output << " cost : " <<  d.cost << ", using edge " << d.target << ", with backpointers " << bpStr << "\n";
-        output << " Flips = " << flipStr;
-
-        return output;
-    }
 
     Derivation () : cost(0.0), target(0), bp(vector<size_t>()), flips(dense_hash_set<flipT,std::hash<flipT>>()) {
         flips.set_empty_key(make_tuple(-1,-1,""));
@@ -75,6 +63,8 @@ public:
         }
         return seed;
     }
+
+    //friend std::ostream& operator<<(std::ostream& output, const Derivation& d);
 };
 
 namespace std {
@@ -86,6 +76,20 @@ namespace std {
         }
     };
 }
+/*
+std::ostream& operator<<(std::ostream& output, const Derivation& d) {
+        string bpStr;
+        for ( auto t : d.bp ) {
+            bpStr += lexical_cast<string>(t) + " ";
+        }
+        string flipStr;
+        for ( auto f : d.flips ) {
+            flipStr += "[" +lexical_cast<string>(get<0>(f)) + ", " + lexical_cast<string>(get<1>(f)) + " : " + get<2>(f) + "] ";
+        }
+        output << " cost : " <<  d.cost << ", using edge " << d.target << ", with backpointers " << bpStr << "\n";
+        output << " Flips = " << flipStr;
 
-
+        return output;
+    }
+*/
 #endif // DERIVATION_HPP

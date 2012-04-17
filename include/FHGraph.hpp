@@ -20,6 +20,7 @@ using boost::bimaps::unordered_set_of;
 using boost::lexical_cast;
 using std::hash;
 using std::set;
+using std::cerr;
 
 class HyperEdge {
 public:
@@ -100,22 +101,17 @@ namespace boost {
 class ForwardHypergraph {
     typedef bimap<
         vector_of< size_t >,
+        //unordered_set_of< size_t >,
         unordered_set_of< FlipKey >
         > VertexBiMapT;
-    struct edgeT {};
-    struct idT {};
-    typedef bimap<
-        vector_of< tagged<size_t, idT> >,
-        unordered_set_of< tagged<HyperEdge, edgeT> >
-        > EdgeBiMapT;
 
     typedef VertexBiMapT::value_type VertexBiKey;
-    typedef EdgeBiMapT::value_type EdgeBiMapKey;
     typedef vector< unordered_set<size_t>* > AdjSetT;
+    typedef vector< HyperEdge > EdgeListT;
 
 public:
     ForwardHypergraph() :
-        _vBiMap( VertexBiMapT() ), _eBiMap( EdgeBiMapT() ), _vertices( AdjSetT() ) {}
+        _vBiMap( VertexBiMapT() ), _edgeList( EdgeListT() ), _vertices( AdjSetT() ) {}
 
     bool addVertex( const FlipKey& k ) {
         auto it = _vBiMap.right.find(k);
@@ -124,6 +120,7 @@ public:
             size_t vid = _vertices.size();
             //cout << "SIZE OF _vBiMap is " << vid << "\n";
             _vBiMap.push_back( VertexBiMapT::value_type(vid, k) );
+            //_vBiMap.insert( VertexBiMapT::value_type(vid,k) );
             _vertices.push_back( new unordered_set<size_t>() );
             return true;
         } // else {//cout << "ALREADY FOUND " << k << " in the hash!\n";}
@@ -134,35 +131,39 @@ public:
         auto hind = _vBiMap.right.find(head)->second ;
 
         vector<size_t> tailInds; tailInds.reserve(tail.size());
-        for( auto t : tail ) {
+        for( const auto& t : tail ) {
             auto v = _vBiMap.right.find(t);
-            if ( v == _vBiMap.right.end() ) { return false; }
+            if ( v == _vBiMap.right.end() ) { abort(); }
             tailInds.push_back( v->second );
         }
-        sort( tailInds.begin(), tailInds.end() );
+        //sort( tailInds.begin(), tailInds.end() );
 
         HyperEdge edge(tailInds, hind, weight);
-        auto it = _eBiMap.right.find(edge);
-        if ( it == _eBiMap.right.end() ) {
-            size_t eid = _eBiMap.size();
-            _eBiMap.push_back( EdgeBiMapT::value_type(eid, edge) );
-            (_vertices[hind])->insert( eid );
-            //cout << "Adding hyperedge " << edge << "\n";
-            return true;
-        }
+        //auto it = _eBiMap.right.find(edge);
+        //if ( it == _eBiMap.right.end() ) {
+        size_t eid = _edgeList.size();
+        _edgeList.push_back(edge);
+        //_eBiMap.push_back( EdgeBiMapT::value_type(eid, edge) );
+        (_vertices[hind])->insert( eid );
+        //cout << "Adding hyperedge " << edge << "\n";
+        return true;
+        //}
         return false;
     }
 
-    const size_t& getHead( const size_t& eInd ) { return (_eBiMap.left.begin()+eInd)->second.head(); } //.right.head(); }
-    const vector<size_t>& getTail( const size_t& eInd) { return (_eBiMap.left.begin()+eInd)->second.tail();}//.right.tail(); }
+    const size_t& getHead( const size_t& eInd ) { return _edgeList[eInd].head(); } //(_eBiMap.left.begin()+eInd)->second.head(); } //.right.head(); }
+    const vector<size_t>& getTail( const size_t& eInd) { return _edgeList[eInd].tail(); } // (_eBiMap.left.begin()+eInd)->second.tail();}//.right.tail(); }
 
-    const FlipKey& vertex( const size_t& vid ) const {return (_vBiMap.left.begin()+vid)->second;}
-    const HyperEdge& edge( const size_t& eid ) const {return (_eBiMap.left.begin()+eid)->second;}
+    const FlipKey& vertex( const size_t& vid ) const {
+    //return (_vBiMap.left.find(vid)->second); }
+        return (_vBiMap.left.begin()+vid)->second;
+    }
+    const HyperEdge& edge( const size_t& eid ) const {return _edgeList[eid]; } // (_eBiMap.left.begin()+eid)->second;}
 
     const size_t& index( const FlipKey& k ) const { return (_vBiMap.right.find(k)->second); }
 
     size_t order() const { return _vBiMap.size(); }
-    size_t size() const { return _eBiMap.size(); }
+    size_t size() const { return _edgeList.size(); }//_eBiMap.size(); }
     const unordered_set<size_t>& incident( const size_t& hind ) {
         if ( hind < _vertices.size() ) {
             return *(_vertices[hind]);
@@ -174,7 +175,8 @@ public:
 
 private:
     VertexBiMapT _vBiMap;
-    EdgeBiMapT _eBiMap;
+    //EdgeBiMapT _eBiMap;
+    EdgeListT _edgeList;
     AdjSetT _vertices;
 };
 

@@ -17,6 +17,10 @@ Makefile
 cmake_install.cmake
 install_manifest.txt
 
+# Ignore the build dir
+build/
+log
+
 .DS_Store
 
 # Thumbnails
@@ -26,6 +30,7 @@ install_manifest.txt
 .Spotlight-V100
 .Trashes
 
+*.pyc
 *~
 \#*\#
 /.emacs.desktop

@@ -31,9 +31,7 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/variant.hpp>
 #include "GraphUtils.hpp"
-#include "FlipKey.hpp"
 #include "MultiOpt.hpp"
-#include "utils.hpp"
 
 /** CLN **/
 #include <cln/io.h>
@@ -66,86 +64,37 @@ using boost::listS;
 using boost::variant;
 using boost::lexical_cast;
 using Utils::TreeInfo;
+using Utils::Trees::TreePtrT;
+using GraphUtils::undirectedGraphT;
+using GraphUtils::directedGraphT;
 
 #include <cstdlib>
-
-const std::string getName(Tree* t, int nid) {
-    if (t->hasNodeName(nid)) {
-        return t->getNodeName(nid);
-    } else {
-        return reinterpret_cast<bpp::BppString*>( t->getNodeProperty(nid,"name"))->toSTL();
-    }
-}
-
-string getExtantNetwork(const string& s) {
-    return ( s.find("LOST") != string::npos ) ? "LOST" : s.substr( s.find_last_of('_') );
-};
-
-
-void prepareTree( Tree* t, TreeInfo& ti, int nid ) {
-    // if the current node is not the root
-    if ( nid != t->getRootId() ) {
-        auto fid = t->getFatherId(nid);
-        auto parentDeathT = get<1>(ti.extantInterval[fid]);
-        assert ( ti.extantInterval.find(fid) != ti.extantInterval.end() );
-        double fdist = 0.0;
-        if ( t->isLeaf(nid) ) {
-            fdist = std::numeric_limits<double>::infinity();
-        } else if ( t->hasDistanceToFather(nid) ) {
-            fdist = t->getDistanceToFather(nid);
-        }
-        ti.extantInterval[ nid ] = make_tuple( parentDeathT, parentDeathT + fdist );
-    }
-
-
-    if (t->isLeaf(nid)) {
-        ti.leaves[nid] = {nid};
-        ti.subnodes[nid] = {nid};
-        ti.enets[nid] = {getExtantNetwork(getName(t,nid))};
-
-    } else {
-        ti.leaves[nid] = { nid };
-        ti.subnodes[nid] = { nid };
-        ti.enets[nid] = {};
-
-
-        for ( auto cid : t->getSonsId(nid) ) {
-            prepareTree( t, ti, cid );
-        }
-
-        for ( auto cid : t->getSonsId(nid) ) {
-            for ( auto l : ti.leaves[cid] ) { ti.leaves[nid].insert(l); }
-            for ( auto l : ti.subnodes[cid] ) { ti.subnodes[nid].insert(l); }
-            for ( auto l : ti.enets[cid] ) { ti.enets[nid].insert(l); }
-        }
-    }
-    /*
-    cout << "subnodes of " << nid << "\n";
-    for( auto n : ti.subnodes[nid] ) {
-        cout << n << " ";
-    }cout << "\n";
-    */
-}
-
 
 int main( int argc, char **argv ){
     po::options_description desc("Allowed Options");
 
     desc.add_options()
         ("help,h", "produce this message")
-        ("dupHist,d", po::value< string >(), "mesh input file")
         ("target,t", po::value< string >(), "extant graph file")
         ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
         ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
         ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
         ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
         ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
+        ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
         ;
 
     try {
         ArgParser ap( desc );
         ap.parse_args( argc, argv );
-        string treeName = ap["dupHist"].as<string>();
+
+        vector<string> treeNames = ap["dupHist"].as< vector<string> >();
+        if ( treeNames.size() > 2 ) {
+            cerr << "only 1 or 2 duplication histories can be provided; you provided "+treeNames.size() << "\n";
+            abort();
+        } else {
+            for ( const auto& tn : treeNames ) { cout << "input tree : " << tn << "\n"; }
+        }
         string graphName = ap["target"].as<string>();
         string outputName = ap["output"].as<string>();
 
@@ -158,56 +107,65 @@ int main( int argc, char **argv ){
         size_t k = ap["numOpt"].as<size_t>();
 
         cout << "UNDIRECTED = " << undirected << "\n";
-
-        auto newickReader = new Newick(true,true); //No comment allowed!
-        newickReader->enableExtendedBootstrapProperty("name");
         try {
-            auto nexusReader = new NexusIOTree();
-            bpp::TreeTemplate<bpp::Node>* tree;
-            try {
-                tree = newickReader->read(treeName); // Tree in file
-            } catch ( const exception &e ) {
-                cerr << "ERROR READING TREE " << e.what();
-            }
-            cout << "Tree has " << tree->getNumberOfNodes() << " nodes." << endl;
-            //auto rootId = tree->getRootId();
 
-            if ( tree->isRooted() ){ cout << "Tree is rooted\n"; }
-            for ( auto nid : tree->getNodesId() ) {
-                for ( auto prop : tree->getBranchPropertyNames(nid) ) {
-                    tree->setNodeName(nid, reinterpret_cast<bpp::BppString*>(tree->getBranchProperty(nid,prop))->toSTL() );
-                }
+
+            TreePtrT tree ( Utils::Trees::readNewickTree(treeNames[0]) );
+
+            if ( treeNames.size() > 1 ) {
+                auto tree2 = Utils::Trees::readNewickTree(treeNames[1]).release();
+                auto node = new bpp::Node("#preroot#");
+                auto r1 = tree->getRootNode();
+                auto r2 = tree2->getRootNode();
+
+                // relationship with tree 1
+                node->addSon(0, tree->getRootNode());
+                // relationship with tree 2
+                node->addSon(1, tree2->getRootNode());
+
+                // root the tree at our new node
+                tree->setRootNode(node);
+                cout << "rerooted\n";
+                // relabel all of the nodes
+                tree->resetNodesId();
+                cout << "relabeled\n";
+
+                auto rootId = tree->getRootId();
+                // set the name of the root
+                tree->setNodeName( rootId, "#preroot#");
+                tree->setVoidBranchLengths(0.0);
             }
 
-            // cout how many branches had length 0
-            /*
-            int zcount = 0;
-            for ( auto n : tree->getNodesId() ) {
-                if ( n != tree->getRootId() ) {
-                    auto dist = tree->getDistanceToFather(n);
-                    if ( dist == 0.0 ) { zcount++; }
-                    cout << tree->getDistanceToFather(n) << " ";
-                }
-            } cout << "\n";
-            cout << zcount << " branches had length 0\n";
-            */
+            // put the node names on all the nodes
+            Utils::Trees::labelTree(tree);
+
+
             TreeInfo tinfo("TreeInfo");
             auto rId = tree->getRootId();
+
+            vector<FlipKey> keyList;
+            if ( treeNames.size() > 1 ) {
+
+                auto r1 = tree->getSonsId(rId)[0];
+                auto r2 = tree->getSonsId(rId)[1];
+
+                keyList.push_back( FlipKey(r1,r2,true,true) );
+            }
+
             tinfo.extantInterval[ rId ] = make_tuple( -std::numeric_limits<double>::infinity(), 0.0 );
-            prepareTree( tree, tinfo, rId );
+            Utils::Trees::prepareTree( tree, tinfo, rId );
 
             // print out the existence intervals for all of the nodes
-
+            /*
             for ( auto nid : tree->getNodesId() ){
-                auto nodeName = getName(tree,nid);
+                auto nodeName = Utils::Trees::getName(tree,nid);
                 cout << "Node [" << nodeName << "] : existance interval = [" <<
                     get<0>(tinfo.extantInterval[nid]) << ", " << get<1>(tinfo.extantInterval[nid]) << "] \n";
             }
-
-
+            */
 
             unordered_map<string, int> leafIDMap;
-            for( auto nid : tree->getLeavesId() ) { leafIDMap[ getName(tree,nid) ] = nid; }
+            for( auto nid : tree->getLeavesId() ) { leafIDMap[ Utils::Trees::getName(tree,nid) ] = nid; }
 
             auto isAdjList = [&](){
                 auto spos = graphName.find_last_of(".");
@@ -215,8 +173,6 @@ int main( int argc, char **argv ){
                 return suffix == ".adj";
             }();
 
-            typedef adjacency_list<boost::hash_setS, vecS, boost::directedS, GraphUtils::Node, GraphUtils::Edge > directedGraphT;
-            typedef adjacency_list<boost::hash_setS, vecS, boost::undirectedS, GraphUtils::Node, GraphUtils::Edge > undirectedGraphT;
             variant< directedGraphT, undirectedGraphT > G;
             if ( undirected ) {
                 G = undirectedGraphT();
@@ -260,7 +216,7 @@ int main( int argc, char **argv ){
             // Count the # of opt slns.
             MultiOpt::countDictT countDict;
             countDict.set_empty_key(-1);
-            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName);
+            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList);
 
             //cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
             //cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";
@@ -269,9 +225,8 @@ int main( int argc, char **argv ){
             //    cout << " (" << get<0>(der) << ",  " << get<1>(der) << ")\n";
             //}
             //cout << "\n";
-            return 0;
 
-
+            /*
             MultiOpt::viterbi( H, tree, tinfo, penalty, order, slnDict );
 
             auto totalDerivs = 1;
@@ -304,13 +259,10 @@ int main( int argc, char **argv ){
 
                 derivNum++;
             }
-
-            delete tree;
+            */
         } catch (const Exception &e) {
             cout << "Error when reading tree : " << e.what() << endl;
         }
-        delete newickReader;
-
     } catch(exception& e) {
 
         cerr << "Caught Exception: [" << e.what() << "]\n";

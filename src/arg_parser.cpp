@@ -28,11 +28,11 @@ ArgParser::ArgParser( po::options_description& opt_desc ) :
 ArgParser::~ArgParser(){}
 
 int ArgParser::parse_args( int argc, char **argv ){
-    po::positional_options_description p;
-    p.add("input-file", -1);
+    //po::positional_options_description p;
+    //p.add("input-file", -1);
 
     po::store( po::command_line_parser( argc, argv ).
-             options(_opt_desc).positional(p).run(), _vm );
+             options(_opt_desc).run(), _vm );
     po::notify(_vm);
 
     if( _vm.count("help") ){

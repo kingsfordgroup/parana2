@@ -1,3 +1,6 @@
+#ifndef GRAPHUTILS_HPP
+#define GRAPHUTILS_HPP
+
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -11,9 +14,9 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/variant.hpp>
 #include <boost/lexical_cast.hpp>
-#include "utils.hpp"
 
 namespace GraphUtils {
+    using std::cout;
     using std::string;
     using std::ifstream;
     using std::getline;
@@ -40,6 +43,11 @@ namespace GraphUtils {
     struct Edge {
         double weight;
     };
+
+    typedef adjacency_list<boost::hash_setS, vecS, boost::directedS, GraphUtils::Node, GraphUtils::Edge > directedGraphT;
+
+    typedef adjacency_list<boost::hash_setS, vecS, boost::undirectedS, GraphUtils::Node, GraphUtils::Edge > undirectedGraphT;
+
 
     template<typename GraphT>
     void readFromAdjacencyList( const string& fname, unordered_map<string,int>& nameMap, GraphT& G ) {
@@ -180,7 +188,7 @@ namespace GraphUtils {
                         Edge e; bool i;
                         boost::tie(e,i) = add_edge(u,v,G);
                         G[e].weight = weight;
-                        //cerr << "added edge " << G[u].name << ", " << G[v].name << " : " << G[e].weight << "\n";
+                        cerr << "added edge " << G[u].name << ", " << G[v].name << " : " << G[e].weight << "\n";
                         remEdgeLine--;
                     }
                 }
@@ -196,3 +204,5 @@ namespace GraphUtils {
 
 
 }
+
+#endif // GRAPHUTILS_HPP
