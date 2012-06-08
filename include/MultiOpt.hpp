@@ -25,6 +25,8 @@
 #include <sstream>
 #include "mpreal.h"
 #include "TreeUtils.hpp"
+#include "CountedDerivation.hpp"
+#include "CostClass.hpp"
 #include "Derivation.hpp"
 #include "FHGraph.hpp"
 #include "GraphUtils.hpp"
@@ -115,10 +117,15 @@ namespace MultiOpt {
     };
 
     typedef tuple<double, vector<size_t> > dvsT;
+    typedef tuple<double, size_t, vector<size_t> > edvsT;
 
+    template <typename elemT>
     class QueueCmp {
     public:
-        bool operator() ( const dvsT& lhs, const dvsT& rhs ) {
+        bool operator() ( const elemT& lhs, const elemT& rhs ) const  {
+            return get<0>(lhs) > get<0>(rhs);
+        }
+        bool operator() ( const elemT& lhs, const elemT& rhs ) {
             return get<0>(lhs) > get<0>(rhs);
         }
     };
@@ -173,6 +180,27 @@ namespace MultiOpt {
     template< typename GT >
     void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
 
+    tuple<double, cl_I> getCostCount( const unordered_map<size_t, vector<CostClass> >& tkd,
+                                      const vector<size_t>& bp,
+                                      const size_t& eid,
+                                      unique_ptr<ForwardHypergraph>& H );
+
+    double getCost( const unordered_map<size_t, vector<CostClass> >& tkd,
+                    const vector<size_t>& bp,
+                    const size_t& eid,
+                    unique_ptr<ForwardHypergraph>& H );
+
+    cl_I getCount( const unordered_map<size_t, vector<CostClass> >& tkd,
+                   const vector<size_t>& bp,
+                   const size_t& eid,
+                   unique_ptr<ForwardHypergraph>& H );
+
+    vector<CostClass> computeKBest(const size_t& vid,
+                                   const size_t& k,
+                                   const unordered_map<size_t, vector<CostClass> >& tkd,
+                                   unique_ptr<ForwardHypergraph>& H);
+
+
     // 0 : 20 23 25
     // 1 : 15 16 34
     // 2 : 10 12 13
@@ -196,8 +224,20 @@ namespace MultiOpt {
 
     FlipKey keyForAction( const FlipKey& fk , const string& ft );
 
-    void viterbiCount( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict, const size_t& k,
-                       const string& outputName, const vector<FlipKey>& outputKeys );
+    void viterbiCount( unique_ptr<ForwardHypergraph>& H,
+                       TreePtrT& t,
+                       TreeInfo& ti,
+                       double penalty,
+                       const vector<size_t>& order,
+                       slnDictT& slnDict,
+                       countDictT& countDict,
+                       const size_t& k,
+                       const string& outputName,
+                       const vector<FlipKey>& outputKeys );
+
+    void viterbiCountNew( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,
+                          slnDictT& slnDict, countDictT& countDict, const size_t& k,
+                          const string& outputName, const vector<FlipKey>& outputKeys );
 
     void viterbi( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict );
 

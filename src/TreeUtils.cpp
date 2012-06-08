@@ -1,5 +1,8 @@
 #include "TreeUtils.hpp"
 #include "MultiOpt.hpp"
+#include <boost/heap/fibonacci_heap.hpp>
+
+using boost::heap::fibonacci_heap;
 
 namespace Utils {
 
@@ -48,11 +51,47 @@ namespace Utils {
         return true;
     }
 
+    template <typename pqT>//, typename pqCompT>
+    bool appendNextWithEdge( const size_t& eid,
+                             const vector<size_t>& inds,
+                             const vector<size_t>& sizes,
+                             pqT& pq,
+                             //vector<pqT>& pq,
+                             //pqCompT& pqComp,
+                             std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore ) {
+
+        size_t i = 0;
+        while ( i < inds.size() ) {
+            vector<size_t> newInds(inds);
+            newInds[i]++;
+            if ( newInds[i] < sizes[i] ) {
+                pq.push( make_tuple( computeScore(eid, newInds), eid, newInds ) );
+            }
+            if (inds[i] != 0) { return true; }
+            i += 1;
+        }
+
+        return true;
+    }
+
     typedef tuple<double, vector<size_t> > dvsT;
     class QueueCmp {
     public:
+        bool cmpArrays( const vector<size_t>& a, const vector<size_t>& b) {
+            assert(a.size() == b.size());
+            size_t i = 0;
+            while (i < a.size() && a[i] == b[i] ) {
+                i += 1;
+            }
+            if (i == a.size()) {
+                return true;
+            } else {
+                return a[i] > b[i];
+            }
+        }
+
         bool operator() ( const dvsT& lhs, const dvsT& rhs ) {
-            return get<0>(lhs) > get<0>(rhs);
+                return get<0>(lhs) >= get<0>(rhs);
         }
     };
 
@@ -123,15 +162,15 @@ namespace Utils {
                 ti.extantInterval[ nid ] = make_tuple( parentDeathT, parentDeathT + fdist );
             }
 
-
             if (t->isLeaf(nid)) {
                 ti.leaves[nid] = {nid};
                 ti.subnodes[nid] = {nid};
                 string enet = getExtantNetwork(getName(t,nid));
-                ti.enets[nid] = { };
-                if( enet != "LOST" ) { ti.enets[nid].insert(enet); }
+                //ti.enets[nid] = { };
+                //if( enet != "LOST" ) { ti.enets[nid].insert(enet); }
+                ti.enets[nid] = { enet };
             } else {
-                ti.leaves[nid] = { nid };
+                ti.leaves[nid] = {};
                 ti.subnodes[nid] = { nid };
                 ti.enets[nid] = unordered_set<string>();
 
@@ -155,4 +194,12 @@ namespace Utils {
 
 }
 
-template bool Utils::appendNext<MultiOpt::dvsT, MultiOpt::QueueCmp>( double, const vector<size_t>&, const vector<size_t>& , vector<MultiOpt::dvsT>& , MultiOpt::QueueCmp& , std::function< double(const vector<size_t>&) >& );
+template bool Utils::appendNext<MultiOpt::dvsT, MultiOpt::QueueCmp<MultiOpt::dvsT>>( double, const vector<size_t>&, const vector<size_t>& , vector<MultiOpt::dvsT>& , MultiOpt::QueueCmp<MultiOpt::dvsT>& , std::function< double(const vector<size_t>&) >& );
+
+
+typedef boost::heap::fibonacci_heap<MultiOpt::edvsT, boost::heap::compare<MultiOpt::QueueCmp<MultiOpt::edvsT>>> heapT;
+template bool Utils::appendNextWithEdge<heapT>( const size_t&,
+                                                const vector<size_t>&,
+                                                const vector<size_t>& ,
+                                                heapT&,
+                                                std::function< double(const size_t&, const vector<size_t>&) >&);

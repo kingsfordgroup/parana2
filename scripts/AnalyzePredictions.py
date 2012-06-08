@@ -49,7 +49,7 @@ def createParser():
 def filteredGraph(G, nodes, cutoff=0.5):
     NG = nx.Graph()
     for u,v in G.edges_iter():
-        if ((u in nodes) and (v in nodes)) and G[u][v]['weight'] >= cutoff :
+        if ((u in nodes) and (v in nodes)) and G[u][v]['weight'] > cutoff :
             NG.add_edge(u,v)
     return NG
 
@@ -72,7 +72,7 @@ def main():
         print("==================")
         evaluation.printStats( filteredGraph(oGraphs[gtName], gtGraph.nodes()), gtGraph )
         print >>sys.stderr, "Pinney et. al : {0}".format(getCurve(oGraphs[gtName], gtGraph))
-        evaluation.printStats( filteredGraph(paranaGraph, gtGraph.nodes(), cutoff=0.085 ), gtGraph )
+        evaluation.printStats( filteredGraph(paranaGraph, gtGraph.nodes(), cutoff=0.02 ), gtGraph )
         print >>sys.stderr, "Parana 2.0    : {0}".format(getCurve(paranaGraph, gtGraph))
         print("\n")
     sys.exit(0)

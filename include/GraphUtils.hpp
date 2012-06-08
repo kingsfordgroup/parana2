@@ -55,8 +55,6 @@ namespace GraphUtils {
         typedef typename boost::graph_traits< GraphT >::edge_descriptor Edge;
         typedef unordered_map<string,Vertex> svMap;
 
-        for (auto e : nameMap) { cout << "nameMap[" << e.first << "] = " << e.second << "\n";}
-
         svMap namePosMap;
         bool inserted;
         Vertex u,v;
@@ -70,13 +68,9 @@ namespace GraphUtils {
                 getline( gfile, line, '\n' );
                 if ( gfile.eof() ) { break; }
                 boost::algorithm::trim(line);
-                //cout << "LINE = " << line << "\n";
                 auto vline = line.substr( 0, line.find_first_of('#') );
                 splitVectorT splitVec;
                 split( splitVec, vline, is_any_of(" \t"), token_compress_on );
-                //cout << "TOKENS " << "\n";
-                //for_each( splitVec.begin(), splitVec.end(), [](const string& s){ cout << " " << s << "\n"; });
-                //cout << "\n";
 
                 if ( splitVec.size() > 0 ) {
                     auto fromVert = splitVec[0];
@@ -89,9 +83,7 @@ namespace GraphUtils {
                     } else {
                         u = pos->second;
                     }
-                    //cerr << "G[ " << u << "] :: " << " name = " << G[u].name << ", id = " << G[u].idx << "\n";
 
-                    //cout << "source: " << fromVert << " :: ";
                     auto tgtIt = splitVec.begin(); tgtIt++;
                     for_each( tgtIt, splitVec.end(), [&](const string& tgt) {
 
@@ -109,9 +101,6 @@ namespace GraphUtils {
                             boost::tie(e,i) = add_edge(u,v,G);
                             G[e].weight = 1.0;
                         } );
-                    //cout << "\n";
-                } else {
-                    cerr << "read comment line " << line;
                 }
 
             }
@@ -148,7 +137,6 @@ namespace GraphUtils {
 
                 splitVectorT splitVec;
                 split( splitVec, vline, is_any_of(" \t"), token_compress_on );
-                //for_each( splitVec.begin(), splitVec.end(), [](const string& s){ cout << " " << s << "\n"; });
 
                 if ( splitVec.size() > 0 ) {
                     auto fromVert = splitVec[0];
@@ -188,7 +176,6 @@ namespace GraphUtils {
                         Edge e; bool i;
                         boost::tie(e,i) = add_edge(u,v,G);
                         G[e].weight = weight;
-                        cerr << "added edge " << G[u].name << ", " << G[v].name << " : " << G[e].weight << "\n";
                         remEdgeLine--;
                     }
                 }

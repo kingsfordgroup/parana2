@@ -81,6 +81,7 @@ int main( int argc, char **argv ){
         ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
         ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
         ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
+        ("old,l", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
         ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
         ;
 
@@ -154,7 +155,26 @@ int main( int argc, char **argv ){
 
             tinfo.extantInterval[ rId ] = make_tuple( -std::numeric_limits<double>::infinity(), 0.0 );
             Utils::Trees::prepareTree( tree, tinfo, rId );
-
+            /*
+            auto nodes = vector<int>(tree->getNodesId());
+            std::sort( nodes.begin(), nodes.end(),
+                [&]( const int& n1, const int& n2 ) -> bool {
+                    return tree->getNodeName(n1) < tree->getNodeName(n2);
+                }
+            );
+            for ( auto n : nodes ) {
+                cerr << tree->getNodeName(n) << ",";
+                for ( auto sn : tinfo.leaves[n] ) {
+                    cerr << " " << tree->getNodeName(sn);
+                }
+                cerr << ",";
+                for ( auto en : tinfo.enets[n] ) {
+                    cerr << " " << en;
+                }
+                cerr << "\n";
+            }
+            exit(0);
+            */
             // print out the existence intervals for all of the nodes
             /*
             for ( auto nid : tree->getNodesId() ){
@@ -216,7 +236,13 @@ int main( int argc, char **argv ){
             // Count the # of opt slns.
             MultiOpt::countDictT countDict;
             countDict.set_empty_key(-1);
-            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList);
+            if ( ap.isPresent("old") ) {
+                cerr << "Old algo\n";
+                MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList);
+            } else {
+                cerr << "New algo\n";
+                MultiOpt::viterbiCountNew(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList);
+            }
 
             //cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
             //cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";

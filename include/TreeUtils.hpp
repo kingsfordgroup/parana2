@@ -95,6 +95,13 @@ namespace Utils {
                      pqCompT& pqComp,
                      std::function< double(const vector<size_t>&) >& computeScore );
 
+    template <typename pqT>
+    bool appendNextWithEdge( const size_t& eid,
+                             const vector<size_t>& inds,
+                             const vector<size_t>& sizes,
+                             pqT& pq,
+                             std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore );
+
     namespace Trees {
         typedef unique_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
 

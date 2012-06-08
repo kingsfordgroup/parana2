@@ -40,10 +40,10 @@ namespace Utils {
 
     }
 
-    template <typename pqT, typename pqCompT>
+    template <typename pqT, typename pqCompT<pqT>>
     bool appendNext( const vector<size_t>& sizes,
                      vector<pqT>& pq,
-                     pqCompT& pqComp,
+                     pqCompT<pqT>& pqComp,
                      std::function< double(const vector<size_t>&) >& computeScore ) {
 
         if (pq.empty()) { return false; }
@@ -92,6 +92,33 @@ namespace Utils {
             */
         return true;
     }
+
+    template <typename pqT, typename pqCompT<pqT>>
+    bool appendNextWithEdge( const vector<size_t>& sizes,
+                             vector<pqT>& pq,
+                             pqCompT<pqT>& pqComp,
+                             std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore ) {
+
+        if (pq.empty()) { return false; }
+
+        double score; size_t eid; vector<size_t> inds;
+        tie(score,inds) = pq.front();
+        std::pop_heap( pq.begin(), pq.end(), pqComp ); pq.pop_back();
+
+         for (size_t i = 0; i < inds.size(); ++i) {
+            vector<size_t> newInds(inds);
+            newInds[i]++;
+            if ( newInds[i] < sizes[i] ) {
+                pq.push_back( make_tuple( computeScore(eid, newInds), eid, newInds ) );
+                std::push_heap( pq.begin(), pq.end(), pqComp );
+            }
+            if (inds[i] != 1) {
+                break;
+            }
+         }
+        return true;
+    }
+
 
     bool differentExtantNetworks( const TreeInfo& tinfo, int u, int v ) {
         if ( u == v ) { return false; }
