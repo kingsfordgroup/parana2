@@ -114,7 +114,7 @@ namespace MultiOpt {
 
         costDict[ both ][ none ] = [=](const double& pf, const double& pr) {
             return make_tuple( undirected ? dc : (pf+pr)*dc, "b-" );
-        }; // was pf*dc
+        };
         costDict[ both ][ fw ] = [=](const double& pf, const double& pr) {
             return make_tuple( (1.0-pf)*dc + pr*dc, "r-" );
         };
@@ -163,7 +163,7 @@ namespace MultiOpt {
             return make_tuple( p*cc, "b+" );
         };
         selfLoopCostDict[ none ][ false ] = [=] (const double& p) {
-            return make_tuple( p*dc, "n" );
+            return make_tuple( 0.0, "n" );
         };
 
         selfLoopCostDict[ rev ][ true ] = [=] (const double& p) {
@@ -1619,7 +1619,7 @@ for ( auto tup: ele.second ) {
 
             // The current vertex and it's probability
             auto key = H->vertex(*vit);
-            auto parentProb = (probMap.find(*vit) == probMap.end() ? 0.0 : probMap[*vit];
+            auto parentProb = (probMap.find(*vit) == probMap.end()) ? 0.0 : probMap[*vit];
 
             // The total # of derivations of this vertex (over all considered cost classes)
             cl_I total(0);
