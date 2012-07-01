@@ -17,11 +17,28 @@ using std::unordered_map;
 using std::vector;
 using cln::cl_I;
 
-class EdgeDerivInfo{
+/** Holds the relevant information, for the eager algorithm, about
+ * derivations using a particular edge.
+ *
+ * For each edge and each cost class, there will be an associated
+ * EdgeDerivInfoEager instance.  This class will hold the information
+ * about the count attributed to each edge, as well as the frontier of
+ * the derivations using this edge.
+ */
+class EdgeDerivInfoEager{
+
+    // typedefs
 public:
-    EdgeDerivInfo( ) : _count(cl_I(0)), _frontier( vector<size_t>(0,0) ) {}
-    EdgeDerivInfo( const cl_I& count,
+    typedef std::vector<size_t> FrontierT;
+public:
+    EdgeDerivInfoEager( ) : _count(cl_I(0)), _frontier( vector<size_t>(0,0) ) {}
+    EdgeDerivInfoEager( const cl_I& count,
                    const std::vector<size_t>& frontier ): _count(count), _frontier(frontier) {}
+
+    void updateWithDeriv( const CountedDerivation& d ) {
+        updateCount( d.count );
+        updateFrontier( d.bp );
+    }
 
     void updateFrontier( const std::vector<size_t>& bp ) {
         assert(bp.size() == _frontier.size());
@@ -33,18 +50,52 @@ public:
     void updateCount( const cl_I& nc ) { _count += nc; }
     const cl_I& count() { return _count; }
     const std::vector<size_t>& frontier() { return _frontier; }
+    void freeDerivations() { _frontier.clear(); }
 
 private:
     std::vector<size_t> _frontier;
     cl_I _count;
 };
 
+// lazy
+
+class EdgeDerivInfoLazy{
+    // typedefs
+public:
+    typedef std::vector< std::vector<size_t> > FrontierT;
+public:
+    EdgeDerivInfoLazy( ) : _count(cl_I(0)), _frontier( vector<vector<size_t>>(0,vector<size_t>()) ) {}
+    EdgeDerivInfoLazy( const cl_I& count,
+                   const std::vector<size_t>& ibp ): _count(count), _frontier({ibp}) {}
+
+    void updateWithDeriv( const CountedDerivation& d ) {
+        updateCount( d.count );
+        updateFrontier( d.bp );
+    }
+
+    void updateFrontier( const std::vector<size_t>& bp ) {
+        _frontier.push_back(bp);
+    }
+
+    void updateCount( const cl_I& nc ) { _count += nc; }
+
+    void freeDerivations() { _frontier.clear(); }
+
+    const cl_I& count() { return _count; }
+    const std::vector<std::vector<size_t>>& frontier() { return _frontier; }
+
+private:
+    std::vector<std::vector<size_t>> _frontier;
+    cl_I _count;
+};
+
+template <typename EdgeDerivInfoT>
 class CostClass {
 
     typedef size_t edgeID_t;
 public:
-    CostClass(): _cost(-std::numeric_limits<double>::max()) {}
-    CostClass(double cost): _cost(cost) {}
+    CostClass(): _usedEdges(unordered_map<edgeID_t, EdgeDerivInfoT>()), _cost(-std::numeric_limits<double>::max()) {}
+    CostClass(double cost): _usedEdges(unordered_map<edgeID_t, EdgeDerivInfoT>()), _cost(cost) {}
 
     /** Is the edge eid used by this derivation */
     bool hasEdge( const edgeID_t& eid ) { return _usedEdges.find(eid) != _usedEdges.end(); }
@@ -65,17 +116,33 @@ public:
         if ( hasEdge(e) ) {
             // For each tail node, possibly update the largest used
             // cost class
-            _usedEdges[e].updateFrontier( deriv.bp );
-            _usedEdges[e].updateCount( numSln );
+
+            // lazy
+            _usedEdges[e].updateWithDeriv( deriv );
+
+            // eager
+            //_usedEdges[e].updateFrontier( deriv.bp );
+            //_usedEdges[e].updateCount( numSln );
         } else {
-            _usedEdges[e] = EdgeDerivInfo( numSln, deriv.bp  );
+            _usedEdges[e] = EdgeDerivInfoT( numSln, deriv.bp  );
         }
     }
 
-    const vector<size_t>& getEdgeFrontier( const edgeID_t& eid ) {
-      return _usedEdges[eid].frontier();
+    const typename EdgeDerivInfoT::FrontierT& getEdgeFrontier( const edgeID_t& eid ) {
+        return _usedEdges[eid].frontier();
     }
 
+    // lazy
+    //const vector<vector<size_t>>& getEdgeFrontier( const edgeID_t& eid ) {
+    //return _usedEdges[eid].frontier();
+    //}
+
+    //eager
+    /*
+    const vector<size_t>& getEdgeFrontier( const edgeID_t& eid ) {
+        return _usedEdges[eid].frontier();
+    }
+    */
     const vector<edgeID_t> usedEdges() {
        vector<edgeID_t> ue; ue.reserve(_usedEdges.size());
        for( auto it = _usedEdges.begin(); it != _usedEdges.end(); ++it ) {
@@ -109,12 +176,17 @@ public:
    double cost() const { return _cost; }
 
 
+    void freeDerivations() {
+        for ( auto& ueit : _usedEdges ) {
+            ueit.second.freeDerivations();
+        }
+    }
 private:
     /** The edges used to obtain this cost class
      * A map from the edge id to the least and greatest cost classes
      * used by each tail node
      */
-    unordered_map<edgeID_t, EdgeDerivInfo> _usedEdges;
+    unordered_map<edgeID_t, EdgeDerivInfoT> _usedEdges;
     double _cost;
     cl_I _total;
 };

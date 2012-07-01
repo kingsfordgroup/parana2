@@ -52,6 +52,5 @@ const po::variable_value & ArgParser::operator[](const string& vname){
 }
 
 bool ArgParser::isPresent(const string& vname) {
-    cout << "checking " << vname << "\n";
     return _vm.count(vname);
 }

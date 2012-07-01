@@ -6,6 +6,12 @@ using boost::heap::fibonacci_heap;
 
 namespace Utils {
 
+    double round3( double num ) {
+        double result = num * 1000;
+        result = std::floor(result);
+        result = result / 1000;
+        return result;
+    };
 
     bool advanceElems( vector<size_t>& ptrs, const vector<size_t>& sizes ) {
 
@@ -74,6 +80,49 @@ namespace Utils {
         return true;
     }
 
+
+    template <typename pqT>//, typename pqCompT>
+    bool appendNextWithEdgeOrig( const size_t& eid,
+                                 const vector<size_t>& inds,
+                                 const vector<size_t>& sizes,
+                                 pqT& pq,
+                                 std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore ) {
+
+        size_t i = 0;
+        while ( i < inds.size() ) {
+            vector<size_t> newInds(inds);
+            newInds[i]++;
+            if ( newInds[i] < sizes[i] ) {
+                double score = computeScore(eid, newInds);
+                bool exists = false;
+                auto it = pq.ordered_begin();
+                while( it != pq.ordered_end() && !exists ) {
+                    double dscore = get<0>(*it);
+                    size_t oeid = get<1>(*it);
+                    if ( dscore == score && eid == oeid ) {
+                        auto oinds = get<2>(*it);
+                        size_t sct = 0;
+                        for( size_t j = 0; j < oinds.size(); ++j ) {
+                            if( newInds[j] != oinds[j] ){ break; } else { sct += 1; }
+                        }
+                        if ( sct == oinds.size() ) { exists = true; }
+                    }
+                    if ( dscore > score ) { break; }
+                    ++it;
+                }
+
+                if (!exists) {
+                    pq.push( make_tuple( computeScore(eid, newInds), eid, newInds ) );
+                }
+            }
+            //if (inds[i] != 0) { return true; }
+            i += 1;
+        }
+
+        return true;
+    }
+
+
     typedef tuple<double, vector<size_t> > dvsT;
     class QueueCmp {
     public:
@@ -125,7 +174,6 @@ namespace Utils {
             newickReader->enableExtendedBootstrapProperty("name");
             try {
                 TreePtrT tree( newickReader->read(treeName) ); // Tree in file
-                cout << "Tree has " << tree->getNumberOfNodes() << " nodes." << endl;
                 return tree;
             } catch(std::exception& e) {
                 cerr << "Caught Exception: [" << e.what() << "]\n";
@@ -199,6 +247,12 @@ template bool Utils::appendNext<MultiOpt::dvsT, MultiOpt::QueueCmp<MultiOpt::dvs
 
 typedef boost::heap::fibonacci_heap<MultiOpt::edvsT, boost::heap::compare<MultiOpt::QueueCmp<MultiOpt::edvsT>>> heapT;
 template bool Utils::appendNextWithEdge<heapT>( const size_t&,
+                                                const vector<size_t>&,
+                                                const vector<size_t>& ,
+                                                heapT&,
+                                                std::function< double(const size_t&, const vector<size_t>&) >&);
+
+template bool Utils::appendNextWithEdgeOrig<heapT>( const size_t&,
                                                 const vector<size_t>&,
                                                 const vector<size_t>& ,
                                                 heapT&,

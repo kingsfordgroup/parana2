@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <fstream>
+#include <cstdlib>
 
 /** Boost Includes */
 #include <boost/program_options.hpp>
@@ -32,11 +33,16 @@
 #include <boost/variant.hpp>
 #include "GraphUtils.hpp"
 #include "MultiOpt.hpp"
+#include "cpplog.hpp"
 
 /** CLN **/
 #include <cln/io.h>
 #include <cln/rational_io.h>
 #include <cln/integer_io.h>
+
+
+// The logger
+#include "cpplog.hpp"
 
 /** Namespace uses */
 using std::string;
@@ -68,20 +74,28 @@ using Utils::Trees::TreePtrT;
 using GraphUtils::undirectedGraphT;
 using GraphUtils::directedGraphT;
 
-#include <cstdlib>
+#ifdef CPPLOG_SYSTEM_IDS
+#include <boost/interprocess/detail/os_thread_functions.hpp>
+using namespace boost::interprocess::detail;
+#endif
 
 int main( int argc, char **argv ){
+    // initialize the logger
+    cpplog::FileLogger log( "log.txt"  );
+
     po::options_description desc("Allowed Options");
 
     desc.add_options()
         ("help,h", "produce this message")
         ("target,t", po::value< string >(), "extant graph file")
         ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
+        ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
         ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
         ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
         ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
         ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
-        ("old,l", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
+        ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
+        ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm")
         ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
         ;
 
@@ -94,7 +108,7 @@ int main( int argc, char **argv ){
             cerr << "only 1 or 2 duplication histories can be provided; you provided "+treeNames.size() << "\n";
             abort();
         } else {
-            for ( const auto& tn : treeNames ) { cout << "input tree : " << tn << "\n"; }
+            for ( const auto& tn : treeNames ) { cerr << "Input tree : " << tn << "\n"; }
         }
         string graphName = ap["target"].as<string>();
         string outputName = ap["output"].as<string>();
@@ -107,9 +121,8 @@ int main( int argc, char **argv ){
         bool directed = !undirected;
         size_t k = ap["numOpt"].as<size_t>();
 
-        cout << "UNDIRECTED = " << undirected << "\n";
+        LOG_INFO(log) << "Input graph is " << (undirected  ? "Undirected" : "Directed") << "\n";
         try {
-
 
             TreePtrT tree ( Utils::Trees::readNewickTree(treeNames[0]) );
 
@@ -126,10 +139,10 @@ int main( int argc, char **argv ){
 
                 // root the tree at our new node
                 tree->setRootNode(node);
-                cout << "rerooted\n";
+                LOG_INFO(log) << "rerooted\n";
                 // relabel all of the nodes
                 tree->resetNodesId();
-                cout << "relabeled\n";
+                LOG_INFO(log) << "relabeled\n";
 
                 auto rootId = tree->getRootId();
                 // set the name of the root
@@ -196,20 +209,36 @@ int main( int argc, char **argv ){
             variant< directedGraphT, undirectedGraphT > G;
             if ( undirected ) {
                 G = undirectedGraphT();
-                if ( isAdjList ) {
-                    GraphUtils::readFromAdjacencyList( graphName, leafIDMap, get<undirectedGraphT>(G) );
-                } else {
-                    GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<undirectedGraphT>(G) );
+                auto& UG = get<undirectedGraphT>(G);
+                //Add all leaf nodes to the graph
+                for ( auto nameId : leafIDMap ) {
+                    if ( nameId.first.find("LOST") == nameId.first.npos  ) {
+                        auto u = add_vertex(UG);
+                        UG[u].name = nameId.first;
+                        UG[u].idx = nameId.second;
+                    }
                 }
 
-                /*
-                auto vp = vertices(get<undirectedGraphT>(G));
-                size_t i = 0;
-                for( auto it = vp.first; it != vp.second; ++it ) {cout << "Vertex " << *it << ", name =  " << get<undirectedGraphT>(G)[*it].name << " # " << i << "\n"; ++i; }
-                */
+
+                if ( isAdjList ) {
+                    GraphUtils::readFromAdjacencyList( graphName, leafIDMap, UG );
+                } else {
+                    GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, UG );
+                }
+
             } else {
                 G = directedGraphT();
-                GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, get<directedGraphT>(G) );
+                auto& DG = get<directedGraphT>(G);
+                // Add all leaf nodes to the graph
+                for ( auto nameId : leafIDMap ) {
+                    if ( nameId.first.find("LOST") == nameId.first.npos  ) {
+                        auto u = add_vertex(DG);
+                        DG[u].name = nameId.first;
+                        DG[u].idx = nameId.second;
+                    }
+                }
+
+                GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, DG);
             }
 
             //typedef graph_traits < graphT >::vertex_descriptor vertexDescT;
@@ -236,64 +265,62 @@ int main( int argc, char **argv ){
             // Count the # of opt slns.
             MultiOpt::countDictT countDict;
             countDict.set_empty_key(-1);
-            if ( ap.isPresent("old") ) {
-                cerr << "Old algo\n";
-                MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList);
-            } else {
-                cerr << "New algo\n";
-                MultiOpt::viterbiCountNew(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList);
-            }
+            auto beta =  ap["beta"].as<double>();
 
-            //cout << "The optimal cost solutions have a cost of " << slnDict[rootInd][0].cost << "\n";
-            //cout << "There are " << get<1>(countDict[rootInd][0]) << " optimal solutions ";
-            //cout << "Near optimal -- (cost, count) : \n";
-            //for ( const auto& der : countDict[rootInd] ) {
-            //    cout << " (" << get<0>(der) << ",  " << get<1>(der) << ")\n";
-            //}
-            //cout << "\n";
+            if (ap.isPresent("lazy")) {
+                // lazy
+                auto derivs = MultiOpt::initKBest( H, order, slnDict );
+                std::vector<size_t> edges = MultiOpt::viterbiPass(H, derivs, order);
 
-            /*
-            MultiOpt::viterbi( H, tree, tinfo, penalty, order, slnDict );
-
-            auto totalDerivs = 1;
-            auto derivNum = 0;
-            double prevCost, newCost;
-            prevCost = newCost = slnDict[ rootInd ][ derivNum ].cost;
-            MultiOpt::initKBest();
-
-            while ( derivNum < totalDerivs && prevCost == newCost ) {
-                MultiOpt::lazyKthBest( H, tinfo, penalty, slnDict, rootInd, derivNum, derivNum );
-                cerr << "returned from call to lazy" << derivNum << "best!!\n";
-                auto d = slnDict[ rootInd ][ derivNum ];
-                cout << "DERIVATION # " << derivNum << ": for [(" << tree->getNodeName(rootKey.u()) << ", " << tree->getNodeName(rootKey.v()) <<  ") : (" << rootKey.f() << rootKey.r() << ")] (" << d.cost << ")\n";
-
-                string fname = "outputDir/output.txt." + lexical_cast<string>(derivNum);
-                std::ofstream output( fname, std::ios::out | std::ios::app );
-                if ( output.is_open() ) {
-                    //output.seekp( 0 );
-                    for ( auto f : d.flips ) {
-                        cout << " [ " << tree->getNodeName(get<0>(f)) << ", " << tree->getNodeName(get<1>(f)) << " : " << get<2>(f) <<  "]\n";
-                        output << tree->getNodeName(get<0>(f)) << "\t" << tree->getNodeName(get<1>(f)) << "\t" << get<2>(f).substr(0,1) << "\n";
+                auto vstr = [&]( const FlipKey& vert ) -> string {
+                    auto uname = tree->getNodeName(vert.u());
+                    auto vname = tree->getNodeName(vert.v());
+                    if (uname > vname) {
+                        auto tmp = vname;
+                        vname = uname;
+                        uname = tmp;
                     }
-                    output.close();
-                } else {
-                    throw std::runtime_error("could not open file ("+fname+")");
+                    auto fstr = vert.f() ? "true" : "false";
+                    auto rstr = vert.r() ? "true" : "false";
+                    return uname+"\t"+vname+"\t"+fstr+"\t"+rstr;
+                };
+
+                vector<size_t> q;
+                q.push_back(rootInd);
+                while ( q.size() > 0 ) {
+                    auto vit = q.back();
+                    auto eid = edges[vit];
+                    auto e = H->edge(eid);
+                    auto isInternal = H->incident(vit).size() > 0;
+                    q.pop_back();
+                    cerr << "satisfying " << vstr(H->vertex(vit)) << " using [ ";
+                    for ( auto tid : e.tail() ) {
+                        cerr << vstr( H->vertex(tid) ) << ", ";
+                        if (isInternal) { q.push_back(tid);}
+                    }
+                    cerr << "]\n";
                 }
 
-                prevCost = newCost;
-                newCost = d.cost;
-
-                derivNum++;
+                exit(0);
+                MultiOpt::lazyKthBest( H, rootInd, k, k, derivs );
+                MultiOpt::computePosteriors(H, tree, order, derivs, outputName, keyList, beta);
+            } else {
+                if ( ap.isPresent("old") ) {
+                    LOG_INFO(log) << "Old algo\n";
+                    MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                } else {
+                    LOG_INFO(log) << "New algo\n";
+                    // eager
+                    MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                }
             }
-            */
+
         } catch (const Exception &e) {
-            cout << "Error when reading tree : " << e.what() << endl;
+            LOG_ERROR(log) << "Error when reading tree : " << e.what() << endl;
         }
     } catch(exception& e) {
-
-        cerr << "Caught Exception: [" << e.what() << "]\n";
+        LOG_ERROR(log) << "Caught Exception: [" << e.what() << "]\n";
         abort();
-
     }
 
     return 0;

@@ -20,12 +20,13 @@ LINK_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/include
   ${BOOST_LIBRARYDIR}
   /usr/lib
-  /usr/local/lib
   /opt/local/lib
+  /usr/local/lib
+  /opt/local/lib/gcc47
   ${PROJECT_ROOT}/lib
 )
 
-LINK_LIBRARIES( m pthread bfd ${Boost_LIBRARIES} profiler bpp-core bpp-phyl bpp-seq
+LINK_LIBRARIES( m pthread ${Boost_LIBRARIES} bpp-core bpp-phyl bpp-seq
 gmp mpfr cln MPFRPP)
 
 ADD_EXECUTABLE( parana++ ${PARANA_SRCS} )

@@ -15,7 +15,6 @@
 #include <memory>
 #include <tuple>
 #include <vector>
-//#include "FlipKey.hpp"
 
 /** Bio++ **/
 #include <Bpp/Phyl/Io/Newick.h>
@@ -39,6 +38,8 @@ namespace Utils {
     using bpp::Tree;
     using bpp::Exception;
 
+    double round3( double num );
+
     class TreeInfo {
     public:
         typedef unordered_map<int, unordered_set<string>> NodeMapT;
@@ -50,10 +51,12 @@ namespace Utils {
         NodeIntervalMapT extantInterval;
         string name;
 
-        TreeInfo( const string n ) : name(n), subnodes(NodeIndMapT()),
+
+
+       TreeInfo( const string n ) : name(n), subnodes(NodeIndMapT()),
                                      leaves(NodeIndMapT()),
                                      enets(NodeMapT()),
-                                     extantInterval(NodeIntervalMapT()) { cout << "creating tree info: " << name << "\n"; }
+                                     extantInterval(NodeIntervalMapT()) { }
 
         bool inSubnodesOf( int u,  int v ) {
             return subnodes[u].find(v) != subnodes[u].end();
@@ -101,6 +104,13 @@ namespace Utils {
                              const vector<size_t>& sizes,
                              pqT& pq,
                              std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore );
+
+    template <typename pqT>
+    bool appendNextWithEdgeOrig( const size_t& eid,
+                                 const vector<size_t>& inds,
+                                 const vector<size_t>& sizes,
+                                 pqT& pq,
+                                 std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore );
 
     namespace Trees {
         typedef unique_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;

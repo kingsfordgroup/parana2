@@ -1,18 +1,22 @@
 #include "MultiOpt.hpp"
+#include "TreeUtils.hpp"
 #include "ProgressDisplay.hpp"
 #include <cmath>
 #include <utility>
 #include <boost/timer/timer.hpp>
 #include <boost/heap/fibonacci_heap.hpp>
-
+#include <cln/float.h>
 
 /** Google's dense hash set and hash map **/
 #include <google/dense_hash_set>
 #include <google/dense_hash_map>
 #include <google/sparse_hash_map>
 
+// For logging
+#include "cpplog.hpp"
 
 namespace MultiOpt {
+    using Utils::round3;
 
     const auto none = make_tuple(false,false);
     const auto fw = make_tuple(true,false);
@@ -222,6 +226,8 @@ namespace MultiOpt {
         using boost::vecS;
         using boost::directedS;
 
+        cpplog::FileLogger log( "log.txt", true );
+
         typedef adjacency_list<vecS, vecS, directedS> graphT;
         graphT G( H->order() );
 
@@ -230,10 +236,10 @@ namespace MultiOpt {
         boost::topological_sort(G, std::back_inserter(torder));
 
         // Remove all of the vertices from "order" if they are not in vset
-        cerr << "ORDER BEFORE = " << torder.size() << "\n";
+        LOG_INFO(log) << "ORDER BEFORE = " << torder.size() << "\n";
         std::copy_if(torder.begin(), torder.end(), std::back_inserter(order), [=](const int& id) -> bool { return vset.find(id) != vset.end(); } );
         //std::copy()
-        cerr << "ORDER AFTER = " << order.size() << "\n";
+        LOG_INFO(log) << "ORDER AFTER = " << order.size() << "\n";
     }
 
     /**
@@ -243,13 +249,14 @@ namespace MultiOpt {
      */
     template <typename T>
     double existencePenalty( const TreeInfo& ti, const T& vert, const double& penalty, const double& travWeight ) {
-        if ( travWeight > 0 ) {
-            auto dist = ti.intervalDistance( vert.u(), vert.v() );
-            if ( dist > 0.0 ) {
-                return penalty * dist;
-            }
-        }
-        return 0.0;
+
+        auto dist = ti.intervalDistance( vert.u(), vert.v() );
+        return (travWeight > 0.0) ?  dist / std::exp(-dist*penalty) : 0.0;
+        //return (travWeight > 0.0 && dist > 0.0 ) ?  (dist*penalty) : 0.0; //1.0 - std::exp(-penalty*dist) : 0.0;
+        //return (travWeight > 0.0) ? ( (penalty*dist) / (1.0 + std::exp(-dist*penalty))) : 0.0;
+        //return (travWeight > 0.0) ? 1.0 + ( dist*penalty) : 1.0;
+        //return (dist > 0.0 && travWeight > 0.0 ) ? (3.0 + (dist*penalty)) : 1.0;// + (penalty * dist);
+
     }
 
     unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( const TreePtrT& t,
@@ -258,6 +265,9 @@ namespace MultiOpt {
             double dc,
             double penalty,
             bool directed ) {
+
+        cpplog::FileLogger log( "log.txt", true );
+
         boost::timer::auto_cpu_timer timer;
 
         Google<int>::Set leafSet;
@@ -318,7 +328,6 @@ namespace MultiOpt {
                         dualFlipEdge.push_back( dualFlipRR );
                     }
 
-
                     //vector<FlipKey> noFlipEdge = { noFlipLL, noFlipRR };
                     //vector<FlipKey> dualFlipEdge = { dualFlipLL, dualFlipRR };
 
@@ -330,7 +339,7 @@ namespace MultiOpt {
                         slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
                     }
                     if ( dualFlipEdge.size() > 0 ) {
-                        auto w = get<0>(selfLoopCostMap[ make_tuple(k.f(), k.r()) ][ dualFlipLL.f() || dualFlipLL.r() ]);
+                        auto w = round3(get<0>(selfLoopCostMap[ make_tuple(k.f(), k.r()) ][ dualFlipLL.f() || dualFlipLL.r() ]));
                         w += existencePenalty(ti, k, penalty, w);
                         if ( std::isfinite(w) ) {
                             slnSpaceGraph->addEdge( dualFlipEdge, k, w );
@@ -375,7 +384,7 @@ namespace MultiOpt {
                         slnSpaceGraph->addEdge( noFlip, k, canonicalDerivCost);//0.0 );
                     }
                     if ( dualFlip.size() > 0 ) {
-                        auto w = get<0>(costMap[ make_tuple(k.f(),k.r()) ][ make_tuple(dualFlipL.f(), dualFlipL.r()) ]);//directed ? 2.0 : 1.0;//2.0 ? directed : 1.0;
+                        auto w = round3(get<0>(costMap[ make_tuple(k.f(),k.r()) ][ make_tuple(dualFlipL.f(), dualFlipL.r()) ]));//directed ? 2.0 : 1.0;//2.0 ? directed : 1.0;
                         w += existencePenalty(ti, k, penalty, w);
                         if ( std::isfinite(w) ) {
                             slnSpaceGraph->addEdge( dualFlip, k, w );
@@ -402,14 +411,14 @@ namespace MultiOpt {
                         }
 
                         if ( fwFlip.size() > 0 ) {
-                            auto w = get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(fwFlipL.f(), fwFlipL.r()) ]);
+                            auto w = round3(get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(fwFlipL.f(), fwFlipL.r()) ]));
                             w += existencePenalty(ti, k, penalty, w);
                             if ( std::isfinite(w) ) {
                                 slnSpaceGraph->addEdge( fwFlip, k , w );
                             }
                         }
                         if ( revFlip.size() > 0 ) {
-                            auto w = get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(revFlipL.f(), revFlipL.r()) ]);
+                            auto w = round3(get<0>(costMap[ make_tuple(k.f(), k.r() ) ][ make_tuple(revFlipL.f(), revFlipL.r()) ]));
                             w += existencePenalty(ti, k, penalty, w);
                             if ( std::isfinite(w) ) {
                                 slnSpaceGraph->addEdge( revFlip, k, w );
@@ -481,19 +490,6 @@ namespace MultiOpt {
             }
         }
 
-        auto vstr = [&]( const FlipKey& vert ) -> string {
-            auto uname = t->getNodeName(vert.u());
-            auto vname = t->getNodeName(vert.v());
-            if (uname > vname) {
-                auto tmp = vname;
-                vname = uname;
-                uname = tmp;
-            }
-            auto fstr = vert.f() ? "true" : "false";
-            auto rstr = vert.r() ? "true" : "false";
-            return uname+"\t"+vname+"\t"+fstr+"\t"+rstr;
-        };
-
         /*
         auto fname = "HYPERGRAPH.txt";
         std::fstream out( fname, std::fstream::out | std::fstream::trunc );
@@ -513,7 +509,7 @@ namespace MultiOpt {
         out.close();
         */
         //cerr << "\n";
-        cerr << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
+        LOG_INFO(log) << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
         return slnSpaceGraph;
     }
 
@@ -657,7 +653,7 @@ for ( auto l : T->getLeavesId() ) {
                     }
                     */
 
-                    auto cost = get<0>(costFlipProb);
+                    auto cost = round3(get<0>(costFlipProb));
                     auto flip = get<1>(costFlipProb);
 
                     Google<Derivation::flipT>::Set effectiveEdges;
@@ -687,7 +683,7 @@ for ( auto l : T->getLeavesId() ) {
                     }
                     */
 
-                    auto cost = get<0>(costFlipProb);
+                    auto cost = round3(get<0>(costFlipProb));
                     auto flip = get<1>(costFlipProb);
 
                     Google<Derivation::flipT>::Set effectiveEdges;
@@ -729,10 +725,12 @@ for ( auto l : T->getLeavesId() ) {
         */
     }
 
-    tuple<double, cl_I> getCostCount( unordered_map<size_t, vector<CostClass> >& tkd,
+    template <typename CostClassT>
+    tuple<double, cl_I> getCostCount( vector<vector<CostClassT>>& tkd,
                                       const vector<size_t>& bp,
                                       const size_t& eid,
                                       unique_ptr<ForwardHypergraph>& H ) {
+
         auto edge = H->edge(eid);
         double cost = edge.weight();
         cl_I count(1);
@@ -748,8 +746,8 @@ for ( auto l : T->getLeavesId() ) {
         return make_tuple(cost, count);
     }
 
-
-    double getCost( unordered_map<size_t, vector<CostClass> >& tkd,
+    template <typename CostClassT>
+    double getCost( vector<vector<CostClassT> >& tkd,
                     const vector<size_t>& bp,
                     const size_t& eid,
                     unique_ptr<ForwardHypergraph>& H ) {
@@ -763,10 +761,11 @@ for ( auto l : T->getLeavesId() ) {
             cost += tkd[tailNode][cci].cost();
             i++;
         }
-        return cost;
+        return round3(cost);
     }
 
-    cl_I getCount( unordered_map<size_t, vector<CostClass> >& tkd,
+    template <typename CostClassT>
+    cl_I getCount( vector< vector<CostClassT> >& tkd,
                    const vector<size_t>& bp,
                    const size_t& eid,
                    unique_ptr<ForwardHypergraph>& H ) {
@@ -831,13 +830,6 @@ for ( auto l : T->getLeavesId() ) {
                 cost += get<0>(countDict[ tailNodes[i] ][ inds[i] ]);
             }
             return cost;
-        };
-
-        auto round3 = [=]( double num ) -> double {
-            double result = num * 1000;
-            result = std::floor(result);
-            result = result / 1000;
-            return result;
         };
 
         typedef tuple<double, cl_I> ccT;
@@ -955,7 +947,7 @@ for ( auto l : T->getLeavesId() ) {
         */
     }
 
-    vector<double> computeAlphasDouble( const vector<tuple<double, cl_I>>& slnVec, size_t k, const cl_I& total ) {
+    vector<double> computeAlphasDouble( const double& bscale, const vector<tuple<double, cl_I>>& slnVec, size_t k, const cl_I& total ) {
         if (slnVec.size() == 0) {
             return vector<double>();
         }
@@ -966,40 +958,38 @@ for ( auto l : T->getLeavesId() ) {
         if ( bestScore == worstScore && slnVec.size() > 2 ) {
             cerr << "bestScore (" << bestScore << ") == worstScore (" << worstScore << ")" << "\n";
             cerr << "=== slnVec ===\n";
-for (const auto& e : slnVec) {
+            for (const auto& e : slnVec) {
                 cerr << "score = " << get<0>(e) << ", count = " << get<1>(e) << "\n";
             }
             std::abort();
         }
-        double diff = worstScore == bestScore ? 1.0 : worstScore - bestScore; // std::max(0.01, worstScore - bestScore);
+        double diff = (worstScore == bestScore) ? 1.0 : worstScore - bestScore; // std::max(0.01, worstScore - bestScore);
         size_t N = slnVec.size();
-
-        std::stringstream ss;
-        ss << get<1>(slnVec.front());
-        mpreal I = ss.str();
-        ss.clear();
-        ss << get<1>(slnVec.back());
-        mpreal J = ss.str();
-        ss.clear();
 
         //double scale = (mpfr::log( J ) - mpfr::log( I )).toDouble() / diff;
         //double scale = 2.0 * estimateThermodynamicBeta( slnVec, bestScore ); // (6.9*k) / diff; // (1.25 * k) / diff;
         //double scale = 1.8;
-        double scale = 60.0 / diff;
+        double beta = bscale * (k);
+        double scale = bscale /  diff;//bscale / diff;
         //double scale = (0.5 * k) / diff;//(2.0 * N) / diff;//(1.5*k) / diff;
         //std::cerr << " **** beta = " << scale << " **** \n";
-        double sum(0.0);
 
-for (const auto& e : slnVec) {
-            double a = std::abs( (bestScore - get<0>(e)) * scale);
-            scores.push_back( std::exp( -(a) ) );
+        //auto floatPrec = cln::float_format(40);
+        //cl_F sum = cl_float(0.0,floatPrec);
+        double sum(0.0);
+        size_t i = 0;
+        for (const auto& e : slnVec) {
+            //scale = std::pow(bscale,i);
+            double a = std::exp( -std::abs( (bestScore - get<0>(e)) * scale) );
+            scores.push_back( a ); //cl_float(get<1>(e) * cl_float(a,floatPrec) ) );
             sum += scores.back();
+            i += 1;
         }
 
-        double invSum = 1.0 / sum;
+        auto invSum = 1.0 / sum;
         vector<double> alphas;
         alphas.reserve(slnVec.size());
-for (const auto& s : scores) {
+        for (const auto& s : scores) {
             alphas.push_back( s * invSum );
         }
         return alphas;
@@ -1007,11 +997,12 @@ for (const auto& s : scores) {
 
     void viterbiCount( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,
                        slnDictT& slnDict, countDictT& countDict, const size_t& k,
-                       const string& outputName, const vector<FlipKey>& outputKeys ) {
+                       const string& outputName, const vector<FlipKey>& outputKeys, const double& beta ) {
 
         // Compute the *weighted* probability of each edge being in
         // the top k distinct scoring solutions
 
+        cpplog::FileLogger log( "log.txt", true );
         auto vstr = [&]( const FlipKey& vert ) -> string {
             auto uname = t->getNodeName(vert.u());
             auto vname = t->getNodeName(vert.v());
@@ -1270,7 +1261,7 @@ for ( auto tup: ele.second ) {
 
             // Compute the weights for each of the score classes
             // considered at this node
-            auto alphas = computeAlphasDouble( countDict[*vit], k, total );
+            auto alphas = computeAlphasDouble( beta, countDict[*vit], k, total );
 
             // for each top-k score class
             for ( size_t i = 0; i < countDict[*vit].size(); ++i ) {
@@ -1422,13 +1413,13 @@ for ( auto tup: ele.second ) {
 
     }
 
-
-    vector<CostClass> computeKBest(const size_t& vid,
+    template <typename CostClassT>
+    vector<CostClassT> computeKBest(const size_t& vid,
                                    const size_t& k,
-                                   unordered_map<size_t, vector<CostClass> >& tkd,
+                                   vector< vector<CostClassT> >& tkd,
                                    unique_ptr<ForwardHypergraph>& H) {
 
-        // Dictionary that hold, for each incoming edge, the
+        // Dictionary that holds, for each incoming edge, the
         // number of score classes for each tail node
         unordered_map<size_t, vector<size_t>> sizeDict;
 
@@ -1439,15 +1430,8 @@ for ( auto tup: ele.second ) {
         fibonacci_heap<edvsT, boost::heap::compare<QueueCmp<edvsT>>> vpq(ord);
 
         // Will hold the top-k cost classes for this solution
-        vector<CostClass> cc;
+        vector<CostClassT> cc;
         cc.reserve(k);
-
-        auto round3 = [=]( double num ) -> double {
-            double result = num * 1000;
-            result = std::floor(result);
-            result = result / 1000;
-            return result;
-        };
 
         for( auto& eid : H->incident(vid) ) {
             // The edge, backpointer array and cost of the derivation
@@ -1474,7 +1458,7 @@ for ( auto tup: ele.second ) {
         };
 
         // Exact score classes
-        double epsilon = 0.5;
+        double epsilon = 0.1;
 
         // While there are still derivations left in the heap,
         // and we don't yet have the required number of solutions
@@ -1496,7 +1480,7 @@ for ( auto tup: ele.second ) {
             if ( cc.size() == 0 || (fabs(cost - cc.back().cost())) > epsilon ) {
                 // Create the new cost class and append the
                 // counted derivation
-                CostClass cclass(cost);
+                CostClassT cclass(cost);
                 cclass.appendToCount(cderiv);
                 cc.push_back( cclass );
             } else { // we found a solution of this score
@@ -1516,16 +1500,20 @@ for ( auto tup: ele.second ) {
         return cc;
     }
 
+    template <typename CostClassT>
     void viterbiCountNew( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,
                           slnDictT& slnDict, countDictT& countDict, const size_t& k,
-                          const string& outputName, const vector<FlipKey>& outputKeys ) {
+                          const string& outputName, const vector<FlipKey>& outputKeys, const double& beta ) {
 
         // Compute the *weighted* probability of each edge being in
         // the top k distinct scoring solutions
+        cpplog::FileLogger log( "log.txt", true );
+
+        size_t maxID = *(std::max_element(order.begin(), order.end()));
 
         // Dictionary that holds the top-k cost classes for each
         // vertex, as well as other relevant information
-        unordered_map< size_t, vector<CostClass> > tkd;
+        vector< vector<CostClassT> > tkd(maxID+1, vector<CostClassT>() );//unordered_map< size_t, vector<CostClass> > tkd;
 
         auto vstr = [&]( const FlipKey& vert ) -> string {
             auto uname = t->getNodeName(vert.u());
@@ -1545,7 +1533,7 @@ for ( auto tup: ele.second ) {
         // Each leaf has a single solution which is, by definition, of optimal cost
         for ( const auto& vit : order ) {
             if ( H->incident(vit).size() == 0 ) {
-                tkd[vit] = { CostClass(slnDict[vit][0].cost) };
+                tkd[vit] = { CostClassT(slnDict[vit][0].cost) };
                 CountedDerivation cderiv( slnDict[vit][0].cost, std::numeric_limits<size_t>::max(), vector<size_t>(), cl_I(1) );
                 tkd[vit].back().appendToCount( cderiv );
                 countDict[vit].push_back( make_tuple(slnDict[vit][0].cost, cl_I(1)) );
@@ -1587,19 +1575,24 @@ for ( auto tup: ele.second ) {
 
         typedef Google< size_t, double >::Map probMapT;
 
+        size_t invalidIdx = std::numeric_limits<size_t>::max();
+
         probMapT probMap;
         probMapT outProbMap;
-        probMap.set_empty_key( std::numeric_limits<size_t>::max() );
-        outProbMap.set_empty_key( std::numeric_limits<size_t>::max() );
+        probMap.set_empty_key( invalidIdx );
+        outProbMap.set_empty_key( invalidIdx );
 
         // Map from a vertex to the maximum cost class that is
         // considered in deriving any solution that is actually used.
-        vector<size_t> maxCostClass(order.size(),0);
-
+        vector<size_t> maxCostClass(maxID+1, 0);
         FlipKey rootKey( t->getRootId(), t->getRootId(), false, false);
         auto rootInd = H->index(rootKey);
+
         // We always consider all k classes for the root
-        maxCostClass[rootInd] = k;
+        // There may be less than k classes if we have enumerated all
+        // of them
+        maxCostClass[rootInd] = std::min(k, tkd[rootInd].size());
+
         // The root gets a probability of 1
         probMap[rootInd] = 1.0;
 
@@ -1624,16 +1617,23 @@ for ( auto tup: ele.second ) {
             // The total # of derivations of this vertex (over all considered cost classes)
             cl_I total(0);
             vector< tuple<double, cl_I> > cd;
-            //for ( size_t i = 0; i < tkd[*vit].size(); ++i) {
-            for ( size_t i = 0; i < maxCostClass[*vit]; ++i ) {
+
+            auto maxDeriv = maxCostClass[*vit];
+            //auto maxDeriv = tkd[*vit].size();
+
+            for ( size_t i = 0; i < maxDeriv; ++i ) {
                 total += tkd[*vit][i].total();
                 for( auto& e : tkd[*vit][i].usedEdges() ) {
                     auto frontier = tkd[*vit][i].getEdgeFrontier(e);
-
                     auto tail = H->edge(e).tail();
+
                     for( size_t j = 0; j < tail.size(); ++j) {
                         auto tn = tail[j];
+                        // eager
                         maxCostClass[tn] = std::max( frontier[j]+1, maxCostClass[tn] );
+
+                        // lazy
+                        // maxCostClass[tn] = std::max( frontier[j][0]+1, maxCostClass[tn] );
                     }
                 }
                 cd.push_back( make_tuple(tkd[*vit][i].cost(), tkd[*vit][i].total()) );
@@ -1641,12 +1641,9 @@ for ( auto tup: ele.second ) {
 
             // Compute the weights for each of the score classes
             // considered at this node
-            auto alphas = computeAlphasDouble( cd, k, total );
-
+            auto alphas = computeAlphasDouble( beta, cd, maxCostClass[*vit], total );
             // for each top-k score class
-            //for ( size_t i = 0; i < tkd[*vit].size(); ++i ) {
-            for ( size_t i = 0; i < maxCostClass[*vit]; ++i ) {
-
+            for ( size_t i = 0; i < maxDeriv; ++i ) {
                 // The i-th cost class for this node
                 auto cc = tkd[*vit][i];
                 double tprob = 0.0;
@@ -1667,11 +1664,13 @@ for ( auto tup: ele.second ) {
                     auto ft = flipType( H->vertex(*vit), H->vertex(tail[0]) );
                     auto outKey = keyForAction( H->vertex(*vit), ft );
                     auto outInd = H->index(outKey);
+
                     // If we currently have not accumulated any
                     // probability mass at outInd, then set it to 0
                     if ( outProbMap.find(outInd) == outProbMap.end() ) {
                         outProbMap[outInd] = 0.0;
                     }
+
                     // Accumulate the probability due to the current
                     // cost class at outInd
                     outProbMap[outInd] += ( parentProb * (alphas[i] * condProb));
@@ -1684,6 +1683,7 @@ for ( auto tup: ele.second ) {
                         if ( probMap.find(tind) == probMap.end() ) {
                             probMap[tind] = 0.0;
                         }
+
                         probMap[tind] += (parentProb * ( alphas[i] * condProb ));
                     }
                 }
@@ -1706,7 +1706,7 @@ for ( auto tup: ele.second ) {
             auto key = H->vertex(vid);
             if ( H->incident(vid).size() == 0 && vid != rootIdFlip && vid != rootIdNoFlip ) {
                 if ( outProbMap[vid] != probMap[vid] && outProbMap[vid] > probMap[vid] ) {
-                    cout << "inProbMap has " << probMap[vid] << ", outProbMap has" << outProbMap[vid] << "\n";
+                    LOG_WARN(log) << "inProbMap has " << probMap[vid] << ", outProbMap has" << outProbMap[vid] << "\n";
                 }
                 outProbMap[vid] = probMap[vid];
             }
@@ -2022,15 +2022,97 @@ for ( auto& f : slnDict[tn][0].flips ) {
 
 
     /** Alg 3 from the paper */
-    typedef std::pair<size_t, Derivation> TaggedDerivT;
-    Google< tuple<size_t,size_t> >::Set recursedStore;
-    Google<size_t, vector<Derivation>*>::Map cand;
+    //typedef std::pair<size_t, Derivation> TaggedDerivT;
+    //Google< tuple<size_t,size_t> >::Set recursedStore;
+    //Google<size_t, vector<Derivation>*>::Map cand;
+
+    CandStoreT cand;
+    DerivStoreT derivs;
+
+    /**
+   * Perform the initial pass over the hypergraph to compute the optimal score class
+   * for each of the vertices.
+   */
+    std::vector<size_t> viterbiPass(
+                     unique_ptr<ForwardHypergraph>& H,
+                     DerivStoreT& derivs,
+                     vector<size_t>& order ) {
+
+        std::vector<size_t> slnEdges( *std::max_element(order.begin(), order.end()), std::numeric_limits<size_t>::max() );
+        for( auto vit : order ) {
+          // Visit the vertices in topological order
+
+          // For each incoming edge
+          for( auto eit : H->incident(vit) ) {
+
+              // Edge info
+              auto edge = H->edge(eit);
+              auto tailNodes = edge.tail(); // the tail nodes
+              vector<size_t> bp(tailNodes.size(), 0); // backpointer
+                                                    // array (all 0's)
+              double cost; cl_I count;
+              std::tie (cost, count) = getCostCount(derivs, bp, eit, H);
+              auto deriv = CountedDerivation(cost, eit, bp, count);
+
+              /*if ( derivs.find(vit) == derivs.end() ) {
+                  derivs[vit] = vector<CostClass>();
+                  }*/
+
+              double costClassWidth = 0.25;
+
+              bool found = false;
+              for ( auto& d : derivs[vit] ) {
+                  if ( fabs(d.cost() - cost) <= costClassWidth ) {
+                      found = true;
+                      d.appendToCount(deriv);
+                  }
+              }
+              if (!found) {
+                  LazyCostClass cc(cost); cc.appendToCount(deriv);
+                  derivs[vit].push_back(cc);
+              }
+
+          }
+          // Throw away all but the top cost class for each vertex
+          std::sort( derivs[vit].begin(), derivs[vit].end(),
+                     [](const LazyCostClass& a, const LazyCostClass& b) -> bool {
+                         return a.cost() < b.cost();
+                     });
+
+          derivs[vit].resize(1);
+          // Pick a random optimal edge
+          if ( derivs[vit].back().usedEdges().size() > 0 ) {
+              auto eid = derivs[vit].back().usedEdges().back();
+              auto e = H->edge(eid);
+              slnEdges[vit] = eid;
+          }
+      }
+      return slnEdges;
+  }
+
+
 
     //unordered_map< size_t, vector<Derivation>* > cand;
 
-    void initKBest() {
-        recursedStore.set_empty_key( make_tuple( std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max() ) );
-        cand.set_empty_key( std::numeric_limits<size_t>::max() );
+    DerivStoreT& initKBest( unique_ptr<ForwardHypergraph>& H, std::vector<size_t>& order, slnDictT& slnDict ) {
+        size_t maxID = *(std::max_element(order.begin(), order.end()));
+        // Dictionary that holds the top-k cost classes for each
+        // vertex, as well as other relevant information
+        derivs = vector< vector<LazyCostClass> >(maxID+1, vector<LazyCostClass>() );
+
+        double costsum = 0.0;
+
+        // Each leaf has a single solution which is, by definition, of optimal cost
+        for ( const auto& vit : order ) {
+            if ( H->incident(vit).size() == 0 ) {
+                derivs[vit] = { LazyCostClass(slnDict[vit][0].cost) };
+                CountedDerivation cderiv( slnDict[vit][0].cost, std::numeric_limits<size_t>::max(), vector<size_t>(), cl_I(1) );
+                derivs[vit].back().appendToCount( cderiv );
+                costsum += slnDict[vit][0].cost;
+            }
+        }
+
+        return derivs;
     }
 
     template<typename T>
@@ -2042,77 +2124,240 @@ for ( auto& e : v ) {
         cerr << "]";
     }
 
-    void getCandidates( const unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, size_t v, size_t k, vector<Derivation>* kbest ) {
-        // There is only one candidate for any leaf node
-        auto incoming = H->incident(v);
-        auto numEdges = incoming.size();
-        if ( numEdges == 0 ) {
-            return;
+    void getCandidates(  unique_ptr<ForwardHypergraph>& H, size_t vid, size_t k, DerivStoreT& derivs ) {
+
+        using boost::heap::fibonacci_heap;
+        CountedDerivCmp<CountedDerivation> ord;
+        cand[vid] = fibonacci_heap<CountedDerivation, boost::heap::compare<CountedDerivCmp<CountedDerivation>>>(ord);
+
+        for ( auto e : H->incident(vid) ) {
+            if (! derivs[vid].back().hasEdge(e) ) {
+                auto edge = H->edge(e);
+                auto tailNodes = edge.tail();
+                auto tailSize = tailNodes.size();
+                std::vector<size_t> bp(tailSize, 0);
+                double cost;
+                cl_I count;
+                std::tie( cost, count ) = getCostCount(derivs, bp, e, H);
+                auto deriv = CountedDerivation(cost, e, bp, count);
+                cand[vid].push(deriv);
+            }
         }
-        // For internal nodes
-        // List of potential candidates
-        vector<Derivation> temp;
-        // The head vertex and it's constituent tree nodes
-        auto hvert = H->vertex(v);
-        auto a = hvert.u();
-        auto b = hvert.v();
+    }
 
-        // Initalize the heap with the 1-best solution for each incoming edge
-for ( auto e : incoming ) {
-            // Compute the score of this derivation
-            auto edge = H->edge(e);
-            auto w = edge.weight();
-            auto tail = edge.tail();
+   bool lazyNext(
+                  unique_ptr<ForwardHypergraph>& H,
+                  boost::heap::fibonacci_heap<CountedDerivation, boost::heap::compare<CountedDerivCmp<CountedDerivation>>>& localCandidates,
+                  size_t eind,
+                  const vector<size_t>& j,
+                  size_t kp,
+                  DerivStoreT& derivs) {
 
-            // The DBP pointing to the 1-best solution of all of tail vertices of this edge
-            vector<size_t> j( tail.size(), 0);
-            // A Tail vertex for this edge
-            auto tvert = H->vertex( tail[0] );
-            auto ft = flipType(hvert, tvert);
+        auto edge = H->edge(eind);
+        auto tailNodes = edge.tail();
+        auto headNode = H->vertex(edge.head());
+        auto edgeCost = edge.weight();
 
-            //cerr << "candid deriv : "; printVector( j ); cerr << "\n";
+        size_t i = 0;
+        while ( i < tailNodes.size() ) {
+            vector<size_t> jp(j);
+            jp[i] += 1;
+            lazyKthBest(H, tailNodes[i], jp[i]+1, kp, derivs);
 
-            // The weight of this derivation
-            auto s = w;
-            // The set of effective flips for this derivation
-            Google<Derivation::flipT>::Set ed;
-            ed.set_empty_key( make_tuple(-1,-1,""));
-            // set<Derivation::flipT> ed;
+            if ( jp[i] < derivs[tailNodes[i]].size() ) {
+                double cost; cl_I count;
+                std::tie(cost, count) = getCostCount(derivs, jp, eind, H);
+                auto deriv = CountedDerivation(cost, eind, jp, count);
+                localCandidates.push(deriv);
+            }
+            if (j[i] != 0) { return true; }
+            i += 1;
+        }
+        return true;
+    }
 
-for ( auto t : tail ) {
-                s += d[t][0].cost;
-                /*std::set_union( d[t][0].flips.begin(), d[t][0].flips.end(),
-                                d[t][0].flips.begin(), d[t][0].flips.end(),
-                                std::inserter( ed, ed.begin() ) );
-                */
-for ( auto& f : d[t][0].flips ) {
-                    ed.insert(f);
+    bool lazyKthBest(
+                     unique_ptr<ForwardHypergraph>& H,
+                     size_t vid,
+                     size_t k,
+                     size_t kp,
+                     DerivStoreT& derivs) {
+
+
+        // If this is our first vist to vertex v, then
+        // populate its candidate list
+
+        //cerr << "Searching for candidates for " << v << "\n";
+        if ( cand.find(vid) == cand.end() ) {
+            getCandidates(H, vid, kp, derivs);
+        }
+
+        // Until we have the required number of derivations
+        while ( derivs[vid].size() <= k ) {
+            // If we've already computed the last derivation
+
+            if ( derivs[vid].size() > 0 ) {
+                auto usedEdges =  derivs[vid].back().usedEdges();
+                for ( auto e : usedEdges ) {
+                    auto& bps = derivs[vid].back().getEdgeFrontier(e);
+                    for ( auto& bp : bps ) {
+                        lazyNext(H, cand[vid], e, bp, kp, derivs);
+                    }
+                }
+                // At this point, we no longer need the actual
+                // derivations for this cost class, so free them
+                derivs[vid].back().freeDerivations();
+            }
+
+            double costClassWidth = 1.0;//0.25;
+            // Get the next best candidate from the heap
+            if ( !cand[vid].empty() ) {
+                auto topCost = cand[vid].top().cost;
+
+                derivs[vid].push_back( LazyCostClass(topCost) );
+                while( !cand[vid].empty() && fabs(cand[vid].top().cost - topCost) <= costClassWidth ) {
+                    auto d = cand[vid].top();
+                    cand[vid].pop();
+                    derivs[vid].back().appendToCount(d);
+                }
+
+            } else {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+
+
+    void computePosteriors(
+                           unique_ptr<ForwardHypergraph>& H,
+                           const TreePtrT& t,
+                           vector<size_t>& order,
+                           DerivStoreT& derivs,
+                           const string& outputName,
+                           const vector<FlipKey>& outputKeys,
+                           const double& beta
+                           ){
+
+
+        typedef vector<InOutProb> ProbMapT;
+        cerr << "Down step";
+        ProbMapT probMap(H->order()+2, InOutProb());
+
+
+        cerr << "Size of probMap = " << probMap.size() << "\n";
+
+        auto rootKey = FlipKey( t->getRootId(), t->getRootId(), false, false );
+        auto rootInd = H->index(rootKey);
+
+        // The root gets a probability of 1
+        probMap[rootInd].inProb = 1.0;
+
+        size_t ctr = 0;
+        size_t tot = order.size();
+
+        auto rootFlip = flipBoth(rootKey);
+        H->addVertex(rootFlip);
+        auto rootIdNoFlip = H->index(rootKey);
+        auto rootIdFlip = H->index(rootFlip);
+
+        for ( auto vitp = order.rbegin(); vitp != order.rend(); ++vitp ) {
+            auto vit = *vitp;
+            cerr << "\r\rprocessing node " << ctr << "/" << tot;
+            ctr += 1;
+            // The current vertex and it's probability
+            auto key = H->vertex(vit);
+            auto parentProb = probMap[vit].inProb;
+
+            vector< tuple<double, cl_I> > cd;
+            // The total # of derivations of this vertex (over all
+            // considered score classes)
+            cl_I total(0);
+            for ( auto& cc : derivs[vit] ) {
+                cd.push_back( make_tuple(cc.cost(), cc.total()) );
+                total += cc.total();
+            }
+
+            // Compute the weights for each of the score classes
+            // considered at this node
+            auto alphas = computeAlphasDouble( beta, cd, derivs[vit].size(), total );
+
+            // for each top-k score class
+            for( size_t i = 0; i < derivs[vit].size(); ++i ) {
+
+                // The score and it's count
+                double pScore(derivs[vit][i].cost());
+                cl_I pCount(derivs[vit][i].total());
+
+                double tprob = 0.0;
+                // for all incoming edges contributing to this score
+                auto incoming = derivs[vit][i].usedEdges();
+
+                for ( auto e : incoming ) {
+
+
+                    // The conditional probability of taking edge 'e'
+                    // given than we're deriving vertex *vit at score 'pScore'
+                    double condProb = derivs[vit][i].edgeProb(e);
+                    tprob += condProb;
+                    auto tail = H->getTail(e);
+                    auto ft = flipType(H->vertex(vit), H->vertex(tail[0]));
+                    auto outKey = keyForAction(H->vertex(vit), ft);
+                    auto outInd = H->index(outKey);
+                    probMap[outInd].outProb += (parentProb * (alphas[i] * condProb));
+
+                    // for all tail vertices of this edge
+                    for ( auto tind : tail ) {
+
+                        // For each vertex in the tail of e, it gets
+                        // probability mass for deriving *vit
+                        // proportional to e's contribution
+                        probMap[tind].inProb += (parentProb * (alphas[i] * condProb));
+                    }
                 }
             }
+        }
 
-            if ( ft != "n" ) {
-                ed.insert( make_tuple(a,b,ft) );
+
+        size_t i = 0;
+        for ( const auto& cc : derivs[rootInd] ) {
+            cout << "cost class " << i << " has " << cc.total() << " solutions of score  " << std::fixed << std::setprecision(16) << cc.cost() << "\n";
+            ++i;
+        }
+
+
+        //bool restrictOutput = (outputKeys.size() != 0);
+
+        bool restrictOutput = false;
+        string fname = outputName;
+        std::fstream output( fname, std::fstream::out | std::fstream::trunc );
+
+        for ( size_t vid = 0; vid < H->order(); ++vid ) { // order.rbegin(); vit != order.rend(); ++vit ) {
+            auto key = H->vertex(vid);
+            if ( H->incident(vid).size() == 0 && vid != rootIdFlip && vid != rootIdNoFlip ) {
+                probMap[vid].outProb = probMap[vid].inProb;
             }
 
-            //make_heap( temp.begin(), temp.end() );
-            temp.push_back( Derivation(s, e, j, ed) );
-            //push_heap( temp.begin(), temp.end() );
+            auto approxInProb = probMap[vid].inProb;
+            auto approxProb = probMap[vid].outProb;
 
+            bool writeOut = true;
+            if ( restrictOutput ) {
+                writeOut = ( std::find( outputKeys.begin(), outputKeys.end(), key ) != outputKeys.end() );
+            }
+
+            if ( approxProb > 0.0 && writeOut ) {
+                auto fs = flipStrMap[key.getDirTuple()];
+                if ( fs != "n" ) {
+                    output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
+                           << "\t" << fs << "\t" << approxProb << "\n";
+                }
+            }
         }
-        // We only need the top k solutions here
-        // kbest = heapq.nsmallest( max(k,numEdges), temp );
-        // Heapify the list and return it
-        k = std::min( temp.size(), std::max( k, numEdges ) );
-        partial_sort( temp.begin(), temp.begin()+k, temp.end(),
-        [] ( const Derivation& d1, const Derivation& d2 ) {
-            return d1.cost < d2.cost;
-        } );
-        kbest->reserve(k);
-        copy( temp.begin(), temp.begin()+k, std::back_inserter(*kbest) );
-        //for ( auto c = temp.begin(); c != temp.begin()+k; ++c ) {
-        //    kbest.push_back(*c);
-        //}
-        //cerr << "|temp| = " << temp.size() << ", |kbest| = " << kbest.size() << "\n";
+        output.close();
+        std::cerr << "\n";
     }
 
     bool sameEffect( const Derivation& d0, const Derivation& d1 ) {
@@ -2141,220 +2386,41 @@ for ( auto& f : d[t][0].flips ) {
         return !hasDiffElement;
     }
 
-    void lazyKthBest( unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, size_t v, size_t k, size_t kp );
-
-    void lazyNext( unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, vector<Derivation>* locCand, size_t eind,
-                   const vector<size_t>& j, size_t kp) {
-
-        auto edge = H->edge(eind);
-        auto tail = edge.tail();
-        auto hvert = H->vertex(edge.head());
-        auto tvert = H->vertex(tail[0]);
-        auto a = hvert.u();
-        auto b = hvert.v();
-
-        auto ft = flipType(hvert, tvert);
-
-        // For each tail node in this edge
-        size_t i = 0;
-for ( auto vind : tail ) {
-            //cerr << "before : deriv ";
-            //printVector(j);
-            //cerr << "\n";
-
-            // Ask for the next best derivation at this tail node
-            vector<size_t> jp(j);
-            jp[i] += 1;
-
-            //cerr << "after : deriv ";
-            //printVector(jp);
-            //cerr << "\n";
-
-            // Compute it recursively
-            //cerr << "Calling lazyKthBest on " << vind << "  ";
-            //printVector(jp);
-            lazyKthBest( H, ti, penalty, d, vind, jp[i], kp );
 
 
 
-            // If this derivation exists
-            if (jp[i] < d[vind].size() ) {
-                // Cost of the derivation -- edge cost + sum of children costs
-                // Effective edges -- Union of the effective edges of
-                // the children
-
-                auto w = edge.weight();
-                auto s = w;
-                Google<Derivation::flipT>::Set ed;
-                ed.set_empty_key( make_tuple(-1,-1,""));
-                //set<Derivation::flipT> ed;
-                /*
-                for (size_t ind = 0; ind < jp.size(); ind+=2 ) {
-                    // Process a pair
-                    if ( jp.size() - ind > 1 ) {
-                        auto vp1 = tail[ind]; auto k1 = jp[ind];
-                        auto vp2 = tail[ind+1]; auto k2 = jp[ind+1];
-
-                        s += (d[vp1][ k1].cost + d[vp2][k2].cost);
-
-                        std::set_union( d[vp1][k1].flips.begin(), d[vp1][k1].flips.end(),
-                                        d[vp2][k2].flips.begin(), d[vp2][k2].flips.end(),
-                                        std::inserter( ed, ed.begin() ) );
-
-                    } else { // Process a single element
-                        auto vp1 = tail[ind]; auto k1 = jp[ind];
-                        s += d[vp1][ k1].cost;
-                        std::set_union( d[vp1][k1].flips.begin(), d[vp1][k1].flips.end(),
-                                        d[vp1][k1].flips.begin(), d[vp1][k1].flips.end(),
-                                        std::inserter( ed, ed.begin() ) );
-
-
-                    }
-                }*/
-
-
-                for (size_t ind = 0; ind < jp.size(); ++ind ) {
-                    auto vp = tail[ind];
-                    auto k = jp[ind];
-                    s += d[ vp ][ k ].cost;
-for ( auto& f : d[vp][k].flips ) {
-                        ed.insert(f);
-                    }
-                }
-
-
-                if ( ft != "n" ) {
-                    // If this edge is effective, then it is added to the effective edges of this derivation
-                    ed.insert( make_tuple(a,b,ft) );
-                }
-                // If this derivation is not in the heap, then add
-                // it
-
-                Derivation deriv(s, eind, jp, ed);
-                auto foundDer = false;
-for ( auto& od : *locCand ) {
-                    if ( sameEffect(deriv, od) ) {
-                        foundDer = true;
-                        break;
-                    }
-                }
-                if ( !foundDer ) {
-                    locCand->push_back( deriv );
-                    push_heap( locCand->begin(), locCand->end(),
-                    [] ( const Derivation& d0, const Derivation& d1) {
-                        return d0.cost > d1.cost;
-                    } );
-                }
-
-            }
-
-            i++;
-        }
-    }
-
-
-    void lazyKthBest( unique_ptr<ForwardHypergraph>& H, TreeInfo& ti, double penalty, slnDictT& d, size_t v, size_t k, size_t kp ) {
-        // If this is our first vist to vertex v, then
-        // populate its candidate list
-
-        //cerr << "Searching for candidates for " << v << "\n";
-        if ( cand.find(v) == cand.end() ) {
-            //cerr << "There were none; adding to the cand map \n";
-            //if ( kp == 0 ) { recursedStore.set_empty_key( make_tuple(std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()) ); }
-            cand[v] = new vector< Derivation >();
-            //cerr << "done \n";
-            getCandidates(H, ti, penalty, d, v, kp, cand[v]);
-            /*
-            cerr << "Added candidates for node " << v << "\n[\n";
-            for ( auto& c : cand[v] ) {
-                cerr << c << "\n";
-            } //cerr << "]\n";
-            */
-        }
-
-        // Until we have the required number of derivations
-        while ( d[v].size() <= k ) {
-            // If we've already computed the last derivation
-            auto lastInd = 0;
-            if ( d[v].size() > 0 ) {
-                // Get this derivation
-                auto lastInd = max_element( d[v].begin(), d[v].end(),
-                [] ( const TaggedDerivT& a, const TaggedDerivT& b ) {
-                    return a.first < b.first;
-                } )->first;
-                auto deriv = d[v][lastInd];
-                //auto deriv = d[v].back();
-
-                // Update the heap adding the last derivation's
-                // successor
-                if ( recursedStore.find( make_tuple(v,lastInd) ) == recursedStore.end() ) {
-                    //cerr << "Calling LazyNext from branch 1\n";
-                    //cerr << "lastInd = " << lastInd << " deriv = " << deriv << "\n";
-                    if ( H->incident(v).size() > 0 ) {
-                        //cerr << " current bp = ";
-                        //printVector(bp);
-                        //cerr << "calling lazy next on cand[" << v << "]\n";
-                        lazyNext(H, ti, penalty, d, cand[v], deriv.target, deriv.bp, kp);
-                    }
-                    //if (v, lastInd) not in recursedStore: recursedStore[ (v, lastInd) ] = False
-                    recursedStore.insert( make_tuple(v, lastInd) );
-                } else {
-                    // Do Nothing
-                    // cerr << "I've already looked for the successors of " << d[v][lastInd]  << "\n";
-                    //cerr << "There are " << cand[v].size() << " candidates\n";
-                }
-            }
-            // Get the next best candidate from the heap
-            if ( cand[v]->size() > 0 ) {
-                //cerr << "Examining candidates " << cand[v].size() << "\n";
-                //cerr << "popping candidate from heap\n";
-                pop_heap( cand[v]->begin(), cand[v]->end(),
-                [] ( const Derivation& d0, const Derivation& d1) {
-                    return d0.cost > d1.cost;
-                } );
-                auto deriv = cand[v]->back();
-                //cerr << "done; deriv is " << deriv << " \n";
-                //cerr << "before pop back, cand[ " << v << "].size() is " << cand[v]->size() << "\n";
-                cand[v]->pop_back();
-                //cerr << "really done\n";
-
-                //cerr << "candidate is : " << deriv << "\n";
-                /*
-                auto lastInd = (max_element( d[v].begin(), d[v].end(),
-                                             [] ( const TaggedDerivT& a, const TaggedDerivT& b ) { return a.first < b.first; } ))->first;
-                */
-                auto existingElem = find_if( d[v].begin(), d[v].end(), [&] ( const TaggedDerivT& od ) {
-                    return sameEffect(deriv,od.second);
-                } );
-                auto found = (existingElem != d[v].end());
-
-                // Always add a derivation if none exist
-                if ( d[v].size() == 0 || ! found ) {
-                    d[v][ d[v].size() ] = deriv;
-                    //d[v].push_back(deriv);
-
-                } else {
-                    // If there is no derivation with this same score and set of effective flips, then add it
-                    //cerr << "skipping solution " << deriv << "\n";
-                    if ( H->incident(v).size() > 0 ) {
-                        //cerr << "2 calling lazyNext on cand[" << v << "]\n";
-                        lazyNext(H, ti, penalty, d, cand[v], deriv.target, deriv.bp, kp);
-                    }
-                }
-            } else {
-                // We have no more derivations for this node!
-                //cerr << "there are 0 candidates for " << H->vertex(v) << "\n";
-                return;
-            }
-        }
-    }
 
 
 }
 
 using GraphUtils::undirectedGraphT;
 using GraphUtils::directedGraphT;
+using std::unique_ptr;
 
-template void MultiOpt::leafCostDict< undirectedGraphT  >( std::unique_ptr<ForwardHypergraph>& , Utils::Trees::TreePtrT& , undirectedGraphT& , bool , double , double , MultiOpt::slnDictT& );
+template void MultiOpt::leafCostDict< undirectedGraphT  >( unique_ptr<ForwardHypergraph>& , Utils::Trees::TreePtrT& , undirectedGraphT& , bool , double , double , MultiOpt::slnDictT& );
 
-template void MultiOpt::leafCostDict< directedGraphT >( std::unique_ptr<ForwardHypergraph>& , Utils::Trees::TreePtrT& , directedGraphT& , bool , double , double , MultiOpt::slnDictT& );
+template void MultiOpt::leafCostDict< directedGraphT >( unique_ptr<ForwardHypergraph>& , Utils::Trees::TreePtrT& , directedGraphT& , bool , double , double , MultiOpt::slnDictT& );
+
+using MultiOpt::LazyCostClass;
+using MultiOpt::EagerCostClass;
+
+template tuple<double, cl_I> MultiOpt::getCostCount( vector<vector<LazyCostClass>>&, const vector<size_t>&, const size_t&, unique_ptr<ForwardHypergraph>&);
+template tuple<double, cl_I> MultiOpt::getCostCount( vector<vector<EagerCostClass>>&, const vector<size_t>&, const size_t&, unique_ptr<ForwardHypergraph>&);
+
+template double MultiOpt::getCost( vector<vector<LazyCostClass>>&, const vector<size_t>&, const size_t&, unique_ptr<ForwardHypergraph>&);
+template double MultiOpt::getCost( vector<vector<EagerCostClass>>&, const vector<size_t>&, const size_t&, unique_ptr<ForwardHypergraph>&);
+
+template cl_I MultiOpt::getCount( vector<vector<LazyCostClass>>&, const vector<size_t>&, const size_t&, unique_ptr<ForwardHypergraph>&);
+template cl_I MultiOpt::getCount( vector<vector<EagerCostClass>>&, const vector<size_t>&, const size_t&, unique_ptr<ForwardHypergraph>&);
+
+template void MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>( unique_ptr<ForwardHypergraph>& H,
+                                                                           Utils::Trees::TreePtrT& t,
+                                                                           Utils::TreeInfo& ti,
+                                                                           double penalty,
+                                                                           const vector<size_t>& order,
+                                                                           MultiOpt::slnDictT& slnDict,
+                                                                           MultiOpt::countDictT& countDict,
+                                                                           const size_t& k,
+                                                                           const string& outputName,
+                                                                           const vector<FlipKey>& outputKeys,
+                                                                           const double& beta );

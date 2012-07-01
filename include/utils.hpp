@@ -8,6 +8,9 @@
 #include <cstdlib>
 #include <vector>
 
+// The logger library
+#include "cpplog.hpp"
+
 namespace Utils {
     using std::unordered_map;
     using std::unordered_set;
