@@ -80,7 +80,7 @@ namespace Utils {
         return true;
     }
 
-
+    /*
     template <typename pqT>//, typename pqCompT>
     bool appendNextWithEdgeOrig( const size_t& eid,
                                  const vector<size_t>& inds,
@@ -121,7 +121,7 @@ namespace Utils {
 
         return true;
     }
-
+*/
 
     typedef tuple<double, vector<size_t> > dvsT;
     class QueueCmp {
@@ -251,9 +251,10 @@ template bool Utils::appendNextWithEdge<heapT>( const size_t&,
                                                 const vector<size_t>& ,
                                                 heapT&,
                                                 std::function< double(const size_t&, const vector<size_t>&) >&);
-
+/*
 template bool Utils::appendNextWithEdgeOrig<heapT>( const size_t&,
                                                 const vector<size_t>&,
                                                 const vector<size_t>& ,
                                                 heapT&,
                                                 std::function< double(const size_t&, const vector<size_t>&) >&);
+*/

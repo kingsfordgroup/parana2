@@ -79,7 +79,7 @@ def main():
     inputGraph = nx.read_edgelist(inputGraphNames[0])
     print(oGraphNames)
 
-    cutoff = 0.7
+    cutoff = 0.99
     paranaGraph = graphWithCutoff(options.parana, 0.0)
     c = findSuggestedCutoff( paranaGraph, inputGraph, cutoff )
     evaluation.printStats( filteredGraph(paranaGraph, inputGraph.nodes(), cutoff=c ), inputGraph )
