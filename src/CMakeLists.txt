@@ -27,6 +27,6 @@ LINK_DIRECTORIES(
 )
 
 LINK_LIBRARIES( m pthread ${Boost_LIBRARIES} bpp-core bpp-phyl bpp-seq
-gmp mpfr cln MPFRPP profiler )
+gmp mpfr cln )
 
 ADD_EXECUTABLE( parana++ ${PARANA_SRCS} )

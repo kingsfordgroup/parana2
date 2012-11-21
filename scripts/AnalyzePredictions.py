@@ -89,7 +89,7 @@ def main():
 
     for gtName, gtGraph in gtGraphs.iteritems():
         print(gtName)
-        c = findSuggestedCutoff( paranaGraph, gtGraph, cutoff )
+        c = 0.5#findSuggestedCutoff( paranaGraph, gtGraph, cutoff )
         print("Parana cutoff = {0}".format(c))
         print("==================")
         evaluation.printStats( filteredGraph(oGraphs[gtName], gtGraph.nodes()), gtGraph )

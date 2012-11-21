@@ -13,9 +13,10 @@ using std::get;
 
 
 class FlipKey {
+public:        
     typedef tuple<int,int> NodeTupT;
+    typedef int NodeIndexT;
 
-public:
     friend ostream& operator<<(ostream& output, const FlipKey& flip);
 
     FlipKey( int u, int v, bool f, bool r );

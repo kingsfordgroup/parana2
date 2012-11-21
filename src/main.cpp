@@ -43,6 +43,7 @@
 
 // The logger
 #include "cpplog.hpp"
+#include "model.hpp"
 
 /** Namespace uses */
 using std::string;
@@ -93,8 +94,10 @@ int main( int argc, char **argv ){
         ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
         ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
         ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
+        ("model,m", po::value< string >()->default_value(""), "file containing probabilistic model")
         ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
         ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
+        ("prob,p", po::value< bool >()->zero_tokens(), "run using \"max. likelihood\" algorithm")
         ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm")
         ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
         ;
@@ -244,6 +247,35 @@ int main( int argc, char **argv ){
             //typedef graph_traits < graphT >::vertex_descriptor vertexDescT;
             //typedef graph_traits < graphT >::edge_descriptor
             //edgeDescT;
+            if ( ap.isPresent("prob") ) {
+
+                LOG_INFO(log) << "Max. likelihood algorithm\n";
+                string modelFile = ap["model"].as<string>();
+
+                LOG_INFO(log) << "Reading model from file " << modelFile << "\n";
+                Model model( modelFile, tinfo, tree );
+
+                auto H = MultiOpt::buildMLSolutionSpaceGraph( tree, tinfo, model, directed );
+
+                vector<size_t> order; order.reserve( H->order() );
+                MultiOpt::topologicalOrder( H, order );
+
+
+                auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false );
+                auto rootInd = H->index(rootKey);
+
+                //vector<size_t> order; order.reserve( H->order() );
+                //MultiOpt::topologicalOrderQueue( H, rootInd, order );
+
+                MultiOpt::slnDictT slnDict;
+                if ( undirected ) {
+                    MultiOpt::MLLeafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                } else {
+                    MultiOpt::MLLeafCostDict( H, tree, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                }
+
+                MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(H, model, tree, order, slnDict, outputName, keyList );
+            } else {
 
             auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
 
@@ -314,7 +346,7 @@ int main( int argc, char **argv ){
                     MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
                 }
             }
-
+        }
         } catch (const Exception &e) {
             LOG_ERROR(log) << "Error when reading tree : " << e.what() << endl;
         }

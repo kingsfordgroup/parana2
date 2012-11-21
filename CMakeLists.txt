@@ -1,7 +1,7 @@
 CMAKE_MINIMUM_REQUIRED( VERSION 2.6 )
 
 # Use GCC
-SET( CMAKE_CXX_COMPILER g++ )
+SET( CMAKE_CXX_COMPILER g++-mp-4.7 )
 
 # When Clang is ready
 #SET( CMAKE_CXX_COMPILER /opt/local/bin/clang++)
@@ -13,7 +13,7 @@ Project( parana )
 SET(CMAKE_VERBOSE_MAKEFILE ON)
 
 SET( CMAKE_BUILD_TYPE Release)
-SET( CMAKE_CXX_FLAGS "-O3 -pg -g -std=c++11 -Wl,-no_pie -Wno-deprecated ${CMAKE_CXX_FLAGS}")
+SET( CMAKE_CXX_FLAGS "-O3 -g -g -std=c++11 -Wl,-no_pie -Wno-deprecated ${CMAKE_CXX_FLAGS}")
 
 # When Clang is ready
 #SET( CMAKE_CXX_FLAGS "-O3 -g -std=c++11 -stdlib=libstdc++ ${CMAKE_CXX_FLAGS}")

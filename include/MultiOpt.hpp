@@ -77,6 +77,8 @@ namespace std {
     };
 }
 
+class Model;
+
 namespace MultiOpt {
 
     using cln::cl_I;
@@ -189,7 +191,7 @@ namespace MultiOpt {
     unordered_set<int> projectToReversedGraph( unique_ptr<ForwardHypergraph>& H, GT& G );
 
     void topologicalOrder( unique_ptr<ForwardHypergraph>& H, vector<size_t>& order );
-
+    void topologicalOrderQueue( unique_ptr<ForwardHypergraph> &H, size_t rootInd, vector<size_t> &order );
     /**
      *  Compute the penalty for this edge to exist based on difference
      *  between the existence intervals of the endpoints and the
@@ -197,6 +199,11 @@ namespace MultiOpt {
      */
     template <typename T>
     double existencePenalty( const TreeInfo& ti, const T& vert, const double& penalty, const double& travWeight );
+
+    unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
+      const TreeInfo &ti,
+      Model& model,
+      bool directed );
 
     unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( const TreePtrT& t,
                                                             const TreeInfo& ti,
@@ -208,6 +215,9 @@ namespace MultiOpt {
 
     template< typename GT >
     void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
+
+    template< typename GT >
+    void MLLeafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
 
     template <typename CostClassT>
     tuple<double, cl_I> getCostCount( vector<vector<CostClassT>>& tkd,
@@ -268,6 +278,11 @@ namespace MultiOpt {
                        const string& outputName,
                        const vector<FlipKey>& outputKeys,
                        const double& beta);
+
+    template <typename CostClassT>
+    void probabilistic( unique_ptr<ForwardHypergraph> &H, Model& model, TreePtrT &t,
+                    const vector<size_t> &order, slnDictT &slnDict, 
+                    const string &outputName, const vector<FlipKey> &outputKeys );
 
     template <typename CostClassT>
     void viterbiCountNew( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,

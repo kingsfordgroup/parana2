@@ -173,6 +173,10 @@ public:
         }
     }
 
+    bool isLeaf( const size_t& vid ){ return incident(vid).size() == 0; }
+
+    bool isInternal( const size_t& vid ){ return !isLeaf(vid); }
+
 private:
     VertexBiMapT _vBiMap;
     //EdgeBiMapT _eBiMap;
