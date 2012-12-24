@@ -42,7 +42,6 @@ def getCurve( pgraph, tgraph ):
 
 def createParser():
     parser = argparse.ArgumentParser(prog="./AnalyzePredictions")
-    parser.add_argument("-i", "--input", default=None, help="Directory containing ground truth networks")
     parser.add_argument("-g", "--gtruth", default=None, help="Directory containing ground truth networks")
     parser.add_argument("-o", "--other", default=None, help="Directory containing other predicitons")
     parser.add_argument("-p", "--parana", default=None, help="File containing PARANA predictions")

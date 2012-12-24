@@ -11,6 +11,29 @@ using std::make_tuple;
 using std::string;
 using std::get;
 
+enum FlipState: uint32_t {
+    none=0,
+    forward=1,
+    reverse=2,
+    both=3
+};
+
+static const FlipState fsBoth[] = { 
+    FlipState::both, FlipState::reverse, FlipState::forward, FlipState::none };
+
+static const FlipState fsForward[] = { 
+    FlipState::forward, // X  : ->
+    FlipState::none,    // -> : X
+    FlipState::both,    // <- : <->
+    FlipState::reverse  // <->: <-
+};
+
+static const FlipState fsReverse[] = { 
+    FlipState::reverse, // X  : <-
+    FlipState::both,    // -> : <->
+    FlipState::none,    // <- : X
+    FlipState::forward  // <->: ->
+};
 
 class FlipKey {
 public:        
@@ -19,7 +42,8 @@ public:
 
     friend ostream& operator<<(ostream& output, const FlipKey& flip);
 
-    FlipKey( int u, int v, bool f, bool r );
+    FlipKey( int u, int v, FlipState t, bool connectU=false, bool connectV=false );
+    FlipKey( int u, int v, bool f, bool r, bool connectU=false, bool connectV=false );
     FlipKey( const FlipKey& o );
 
     bool operator == (const FlipKey& other) const;
@@ -28,18 +52,23 @@ public:
 
     int arity() const;
 
-    const tuple<bool,bool> getDirTuple() const;
+    //const tuple<bool,bool> getDirTuple() const;
 
     int u() const;
     int v() const;
     bool f() const;
     bool r() const;
+    FlipState state() const;
+    bool connectU() const;
+    bool connectV() const;
 
     std::size_t hashCode() const;
 
 private:
     NodeTupT _nodes;
-    bool _f, _r;
+    FlipState _state;
+    //bool _f, _r;
+    bool _connectU, _connectV;
 };
 
 

@@ -214,8 +214,12 @@ namespace Utils {
                 ti.leaves[nid] = {nid};
                 ti.subnodes[nid] = {nid};
                 string enet = getExtantNetwork(getName(t,nid));
+
+                // Skip lost nodes
                 //ti.enets[nid] = { };
                 //if( enet != "LOST" ) { ti.enets[nid].insert(enet); }
+
+                // Consider lost nodes
                 ti.enets[nid] = { enet };
             } else {
                 ti.leaves[nid] = {};

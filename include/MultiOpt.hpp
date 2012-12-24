@@ -1,6 +1,7 @@
 #ifndef MULTI_OPT_HPP
 #define MULTI_OPT_HPP
 
+#include <array>
 #include <fstream>
 #include <map>
 #include <unordered_map>
@@ -89,6 +90,7 @@ namespace MultiOpt {
     using google::dense_hash_set;
     using google::dense_hash_map;
     using google::sparse_hash_map;
+    using std::array;
     using std::map;
     using std::cout;
     using std::unordered_map;
@@ -159,10 +161,16 @@ namespace MultiOpt {
     typedef tuple<bool,bool> flipTupleT;
     typedef tuple<double, string> costRepT;
     typedef unordered_map< flipTupleT, unordered_map<flipTupleT, string> > flipMapT;
-    typedef unordered_map< flipTupleT, unordered_map<flipTupleT, costRepT> > costMapT;
-    typedef unordered_map< flipTupleT, unordered_map<flipTupleT, std::function< costRepT (const double&, const double&) > > > costMapFunT;
-    typedef unordered_map< flipTupleT, unordered_map<bool, costRepT> > selfCostMapT;
-    typedef unordered_map< flipTupleT, unordered_map<bool, std::function<costRepT (const double&) > > > selfCostMapFunT;
+
+    //typedef unordered_map< flipTupleT, unordered_map<flipTupleT, costRepT> > costMapT;
+    typedef array<array<costRepT,4>,4> costMapT;
+    //typedef unordered_map< flipTupleT, unordered_map<flipTupleT, std::function< costRepT (const double&, const double&) > > > costMapFunT;
+    typedef array<array<std::function< costRepT (const double&, const double&) >,4>,4> costMapFunT;
+    
+    //typedef unordered_map< flipTupleT, unordered_map<bool, costRepT> > selfCostMapT;
+    typedef array<array<costRepT,2>,4> selfCostMapT;
+    //typedef unordered_map< flipTupleT, unordered_map<bool, std::function<costRepT (const double&) > > > selfCostMapFunT;
+    typedef array<array<std::function<costRepT (const double&) >,2>,4> selfCostMapFunT;
 
     //    Google< tuple<size_t,size_t> >::Set recursedStore;
     //    Google<size_t, vector<Derivation>*>::Map cand;
@@ -177,6 +185,8 @@ namespace MultiOpt {
         InOutProb( double in, double out ) : inProb(in), outProb(out) {}
     };
 
+    FlipState directionsToFlipState( bool f, bool r );
+
     costMapT getCostDict ( double cc, double dc, bool directed );
 
     costMapFunT getCostFunDict ( double cc, double dc, bool directed );
@@ -190,8 +200,8 @@ namespace MultiOpt {
     template<typename GT>
     unordered_set<int> projectToReversedGraph( unique_ptr<ForwardHypergraph>& H, GT& G );
 
-    void topologicalOrder( unique_ptr<ForwardHypergraph>& H, vector<size_t>& order );
-    void topologicalOrderQueue( unique_ptr<ForwardHypergraph> &H, size_t rootInd, vector<size_t> &order );
+    void topologicalOrder( unique_ptr<ForwardHypergraph>& H, TreePtrT& tree, const TreeInfo& ti, vector<size_t>& order );
+    
     /**
      *  Compute the penalty for this edge to exist based on difference
      *  between the existence intervals of the endpoints and the
@@ -265,6 +275,7 @@ namespace MultiOpt {
 
     void insideOutside( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict, const string& outputName );
 
+    FlipKey canonicalKey( const FlipKey&k );
     FlipKey keyForAction( const FlipKey& fk , const string& ft );
 
     void viterbiCount( unique_ptr<ForwardHypergraph>& H,

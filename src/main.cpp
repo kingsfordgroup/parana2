@@ -27,7 +27,7 @@
 #include <Bpp/Exceptions.h>
 
 /** Boost **/
-#include <algorithm>                 // for std::for_each
+#include <algorithm>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/variant.hpp>
@@ -80,49 +80,132 @@ using GraphUtils::directedGraphT;
 using namespace boost::interprocess::detail;
 #endif
 
-int main( int argc, char **argv ){
+void printUsage() {
+    auto usage = R"(Usage:
+                 parana++ {pars,prob} [opts]
+                 parana++ -h | --help
+                 parana++ -v | --version
+
+                 Arguments:
+                 pars    Use the parsimonious recovery algorithm
+                 prob    Use a probabilistic (ML) recover algorithm
+                 )";
+    std::cout << usage;
+}
+
+void printHelpUsage( ArgParser &ap,
+                     po::options_description &general,
+                     po::options_description &prob,
+                     po::options_description &parsimony) {
+
+    if ( ap.isPresent("help") ) {
+        if ( ap.isPresent("method") ) {
+            auto method = ap["method"].as<std::string>();
+            if ( method == "prob" ) {
+                std::cout << general;
+                std::cout << prob;
+                std::exit(1);
+            } else if ( method == "pars" ) {
+                std::cout << general;
+                std::cout << parsimony;
+                std::exit(1);
+            } else {
+                printUsage();
+                std::exit(1);
+            }
+        } else {
+            printUsage();
+            std::cerr << "\nFor information on a specific method, try \"parana++ {pars,prob} --help\"\n";
+            std::exit(1);
+        }
+    }
+}
+
+int main( int argc, char **argv ) {
     // initialize the logger
     cpplog::FileLogger log( "log.txt"  );
 
-    po::options_description desc("Allowed Options");
+    // The options to choose the method (parsimony | probabilistic)
+    po::positional_options_description p;
+    p.add("method", 1);
+    po::options_description pos("");
+    pos.add_options()
+    ("method", po::value< string >(), "method to use; one of {prob,pars}");
 
-    desc.add_options()
-        ("help,h", "produce this message")
-        ("target,t", po::value< string >(), "extant graph file")
-        ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
-        ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
-        ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
-        ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
-        ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
-        ("model,m", po::value< string >()->default_value(""), "file containing probabilistic model")
-        ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
-        ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
-        ("prob,p", po::value< bool >()->zero_tokens(), "run using \"max. likelihood\" algorithm")
-        ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm")
-        ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
-        ;
+    // The help option
+    po::options_description help("Help Options");
+    help.add_options()
+    ("help,h", po::value<bool>()->zero_tokens(), "display help for a specific method");
+
+    // The general options are relevant to either method
+    po::options_description general("Genearal Options");
+    general.add_options()
+    ("target,t", po::value< string >(), "extant graph file")
+    ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
+    ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
+    ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
+    ;
+
+    // Those options only relevant to the parsimony method
+    po::options_description parsimony("Parsimony Specific Options");
+    parsimony.add_options()
+    ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
+    ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
+    ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
+    ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
+    ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
+    ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm")
+    ;
+
+    // Those options only relevant to the probabilistic method
+    po::options_description prob("Probabilistic Specific Options");
+    prob.add_options()
+    ("model,m", po::value< string >()->default_value(""), "file containing probabilistic model")
+    ;
+
+    // The options description to parse all of the options
+    po::options_description all("Allowed options");
+    all.add(help).add(general).add(pos).add(prob).add(parsimony);
 
     try {
-        ArgParser ap( desc );
+        ArgParser ap( all, p );
+        // If there are no extra command line arguments, then print the useage and exit
+        if ( argc == 1 ) {
+            printUsage();
+            std::exit(1);
+        }
         ap.parse_args( argc, argv );
 
+        // For any combination of cmd line arguments that won't actually run the program
+        // print the appropriate message and exit
+        printHelpUsage(ap, general, prob, parsimony);
+        auto method = ap["method"].as<std::string>();
+
+        // Get the duplication histories
         vector<string> treeNames = ap["dupHist"].as< vector<string> >();
+        // We can't have more than 2
         if ( treeNames.size() > 2 ) {
-            cerr << "only 1 or 2 duplication histories can be provided; you provided "+treeNames.size() << "\n";
+            cerr << "only 1 or 2 duplication histories can be provided; you provided " + treeNames.size() << "\n";
             abort();
         } else {
-            for ( const auto& tn : treeNames ) { cerr << "Input tree : " << tn << "\n"; }
+            for ( const auto & tn : treeNames ) {
+                cerr << "Input tree : " << tn << "\n";
+            }
         }
+
         string graphName = ap["target"].as<string>();
         string outputName = ap["output"].as<string>();
 
-        double penalty = ap["timePenalty"].as<double>();
-        double creationCost = ap["ratio"].as<double>();
-        double deletionCost = 1.0;
-
         bool undirected = ap.isPresent("undir");
         bool directed = !undirected;
+
+        double penalty = ap["timePenalty"].as<double>();
+        double deletionCost = 1.0;
+        double creationCost = ap["ratio"].as<double>();
         size_t k = ap["numOpt"].as<size_t>();
+
+        std::cerr << "[creation] : [deletion] ratio is [" << creationCost << "] : [" << deletionCost << "]\n";
+        std::cerr << "Considering top " << k << " cost classes\n";
 
         LOG_INFO(log) << "Input graph is " << (undirected  ? "Undirected" : "Directed") << "\n";
         try {
@@ -156,7 +239,6 @@ int main( int argc, char **argv ){
             // put the node names on all the nodes
             Utils::Trees::labelTree(tree);
 
-
             TreeInfo tinfo("TreeInfo");
             auto rId = tree->getRootId();
 
@@ -166,7 +248,7 @@ int main( int argc, char **argv ){
                 auto r1 = tree->getSonsId(rId)[0];
                 auto r2 = tree->getSonsId(rId)[1];
 
-                keyList.push_back( FlipKey(r1,r2,true,true) );
+                keyList.push_back( FlipKey(r1, r2, true, true) );
             }
 
             tinfo.extantInterval[ rId ] = make_tuple( -std::numeric_limits<double>::infinity(), 0.0 );
@@ -174,7 +256,7 @@ int main( int argc, char **argv ){
             /*
             auto nodes = vector<int>(tree->getNodesId());
             std::sort( nodes.begin(), nodes.end(),
-                [&]( const int& n1, const int& n2 ) -> bool {
+                    [&]( const int& n1, const int& n2 ) -> bool {
                     return tree->getNodeName(n1) < tree->getNodeName(n2);
                 }
             );
@@ -201,18 +283,22 @@ int main( int argc, char **argv ){
             */
 
             unordered_map<string, int> leafIDMap;
-            for( auto nid : tree->getLeavesId() ) { leafIDMap[ Utils::Trees::getName(tree,nid) ] = nid; }
+            for ( auto nid : tree->getLeavesId() ) {
+                leafIDMap[ Utils::Trees::getName(tree, nid) ] = nid;
+            }
 
-            auto isAdjList = [&](){
+            // Check if the graph is an adjacency list (this means it's unweighted)
+            auto isAdjList = [&]() {
                 auto spos = graphName.find_last_of(".");
                 auto suffix(graphName.substr( spos ));
                 return suffix == ".adj";
             }();
 
             variant< directedGraphT, undirectedGraphT > G;
-            if ( undirected ) {
+            if ( undirected ) { // The target network is undirected
                 G = undirectedGraphT();
-                auto& UG = get<undirectedGraphT>(G);
+                auto &UG = get<undirectedGraphT>(G);
+
                 //Add all leaf nodes to the graph
                 for ( auto nameId : leafIDMap ) {
                     if ( nameId.first.find("LOST") == nameId.first.npos  ) {
@@ -222,16 +308,16 @@ int main( int argc, char **argv ){
                     }
                 }
 
-
-                if ( isAdjList ) {
+                if ( isAdjList ) { // The target graph is unweighted (binary)
                     GraphUtils::readFromAdjacencyList( graphName, leafIDMap, UG );
-                } else {
+                } else { // The target graph has edge weights
                     GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, UG );
                 }
 
-            } else {
+            } else { // The target network is directed
                 G = directedGraphT();
-                auto& DG = get<directedGraphT>(G);
+                auto &DG = get<directedGraphT>(G);
+
                 // Add all leaf nodes to the graph
                 for ( auto nameId : leafIDMap ) {
                     if ( nameId.first.find("LOST") == nameId.first.npos  ) {
@@ -241,13 +327,16 @@ int main( int argc, char **argv ){
                     }
                 }
 
-                GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, DG);
+                if ( isAdjList ) { // The target graph is unweighted (binary)
+                    GraphUtils::readFromAdjacencyList( graphName, leafIDMap, DG );
+                } else { // The target graph has edge weights
+                    GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, DG );
+                }
+
             }
 
-            //typedef graph_traits < graphT >::vertex_descriptor vertexDescT;
-            //typedef graph_traits < graphT >::edge_descriptor
-            //edgeDescT;
-            if ( ap.isPresent("prob") ) {
+            // Using probabilistic (Maximum Likelihood) algo.
+            if ( method == "prob" ) {
 
                 LOG_INFO(log) << "Max. likelihood algorithm\n";
                 string modelFile = ap["model"].as<string>();
@@ -256,13 +345,13 @@ int main( int argc, char **argv ){
                 Model model( modelFile, tinfo, tree );
 
                 auto H = MultiOpt::buildMLSolutionSpaceGraph( tree, tinfo, model, directed );
+                //auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
+                
+                auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
+                auto rootInd = H->index(rootKey);
 
                 vector<size_t> order; order.reserve( H->order() );
-                MultiOpt::topologicalOrder( H, order );
-
-
-                auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false );
-                auto rootInd = H->index(rootKey);
+                MultiOpt::topologicalOrder( H, tree, tinfo, order );
 
                 //vector<size_t> order; order.reserve( H->order() );
                 //MultiOpt::topologicalOrderQueue( H, rootInd, order );
@@ -275,82 +364,87 @@ int main( int argc, char **argv ){
                 }
 
                 MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(H, model, tree, order, slnDict, outputName, keyList );
-            } else {
 
-            auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
+            } else if ( method == "pars" ) { // Using parsimony algo.
 
-            vector<size_t> order; order.reserve( H->order() );
-            MultiOpt::topologicalOrder( H, order );
+                auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
 
-            MultiOpt::slnDictT slnDict;
-            //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
-            if ( undirected ) {
-                MultiOpt::leafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
-            } else {
-                MultiOpt::leafCostDict( H, tree, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
-            }
+                auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
+                auto rootInd = H->index(rootKey);
 
+                vector<size_t> order; order.reserve( H->order() );
+                MultiOpt::topologicalOrder( H, tree, tinfo, order );
 
-            auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false );
-            auto rootInd = H->index(rootKey);
-
-            // Count the # of opt slns.
-            MultiOpt::countDictT countDict;
-            countDict.set_empty_key(-1);
-            auto beta =  ap["beta"].as<double>();
-
-            if (ap.isPresent("lazy")) {
-                // lazy
-                auto derivs = MultiOpt::initKBest( H, order, slnDict );
-                std::vector<size_t> edges = MultiOpt::viterbiPass(H, derivs, order);
-
-                auto vstr = [&]( const FlipKey& vert ) -> string {
-                    auto uname = tree->getNodeName(vert.u());
-                    auto vname = tree->getNodeName(vert.v());
-                    if (uname > vname) {
-                        auto tmp = vname;
-                        vname = uname;
-                        uname = tmp;
-                    }
-                    auto fstr = vert.f() ? "true" : "false";
-                    auto rstr = vert.r() ? "true" : "false";
-                    return uname+"\t"+vname+"\t"+fstr+"\t"+rstr;
-                };
-
-                vector<size_t> q;
-                q.push_back(rootInd);
-                while ( q.size() > 0 ) {
-                    auto vit = q.back();
-                    auto eid = edges[vit];
-                    auto e = H->edge(eid);
-                    auto isInternal = H->incident(vit).size() > 0;
-                    q.pop_back();
-                    cerr << "satisfying " << vstr(H->vertex(vit)) << " using [ ";
-                    for ( auto tid : e.tail() ) {
-                        cerr << vstr( H->vertex(tid) ) << ", ";
-                        if (isInternal) { q.push_back(tid);}
-                    }
-                    cerr << "]\n";
-                }
-
-                exit(0);
-                MultiOpt::lazyKthBest( H, rootInd, k, k, derivs );
-                MultiOpt::computePosteriors(H, tree, order, derivs, outputName, keyList, beta);
-            } else {
-                if ( ap.isPresent("old") ) {
-                    LOG_INFO(log) << "Old algo\n";
-                    MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                MultiOpt::slnDictT slnDict;
+                //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
+                if ( undirected ) {
+                    MultiOpt::leafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
                 } else {
-                    LOG_INFO(log) << "New algo\n";
-                    // eager
-                    MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                    MultiOpt::leafCostDict( H, tree, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                }
+
+                //auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
+                //auto rootInd = H->index(rootKey);
+
+                // Count the # of opt slns.
+                MultiOpt::countDictT countDict;
+                countDict.set_empty_key(-1);
+                auto beta =  ap["beta"].as<double>();
+
+                if (ap.isPresent("lazy")) {
+                    // lazy
+                    auto derivs = MultiOpt::initKBest( H, order, slnDict );
+                    std::vector<size_t> edges = MultiOpt::viterbiPass(H, derivs, order);
+
+                    auto vstr = [&]( const FlipKey & vert ) -> string {
+                        auto uname = tree->getNodeName(vert.u());
+                        auto vname = tree->getNodeName(vert.v());
+                        if (uname > vname) {
+                            auto tmp = vname;
+                            vname = uname;
+                            uname = tmp;
+                        }
+                        auto fstr = vert.f() ? "true" : "false";
+                        auto rstr = vert.r() ? "true" : "false";
+                        return uname + "\t" + vname + "\t" + fstr + "\t" + rstr;
+                    };
+
+                    vector<size_t> q;
+                    q.push_back(rootInd);
+                    while ( q.size() > 0 ) {
+                        auto vit = q.back();
+                        auto eid = edges[vit];
+                        auto e = H->edge(eid);
+                        auto isInternal = H->incident(vit).size() > 0;
+                        q.pop_back();
+                        cerr << "satisfying " << vstr(H->vertex(vit)) << " using [ ";
+                        for ( auto tid : e.tail() ) {
+                            cerr << vstr( H->vertex(tid) ) << ", ";
+                            if (isInternal) {
+                                q.push_back(tid);
+                            }
+                        }
+                        cerr << "]\n";
+                    }
+
+                    exit(0);
+                    MultiOpt::lazyKthBest( H, rootInd, k, k, derivs );
+                    MultiOpt::computePosteriors(H, tree, order, derivs, outputName, keyList, beta);
+                } else {
+                    if ( ap.isPresent("old") ) {
+                        LOG_INFO(log) << "Old algo\n";
+                        MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                    } else {
+                        LOG_INFO(log) << "New algo\n";
+                        // eager
+                        MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                    }
                 }
             }
-        }
         } catch (const Exception &e) {
             LOG_ERROR(log) << "Error when reading tree : " << e.what() << endl;
         }
-    } catch(exception& e) {
+    } catch (exception &e) {
         LOG_ERROR(log) << "Caught Exception: [" << e.what() << "]\n";
         abort();
     }

@@ -20,25 +20,23 @@
 
 #include <arg_parser.hpp>
 
-ArgParser::ArgParser( po::options_description& opt_desc ) :
-  _opt_desc(opt_desc), _vm(po::variables_map())
+ArgParser::ArgParser( po::options_description& opt_desc, po::positional_options_description& pos_opt_desc ) :
+  _opt_desc(opt_desc), _pos_opt_desc(pos_opt_desc), _vm(po::variables_map())
 {
 }
 
 ArgParser::~ArgParser(){}
 
 int ArgParser::parse_args( int argc, char **argv ){
-    //po::positional_options_description p;
-    //p.add("input-file", -1);
-
     po::store( po::command_line_parser( argc, argv ).
-             options(_opt_desc).run(), _vm );
+             options(_opt_desc).positional(_pos_opt_desc).run(), _vm );
     po::notify(_vm);
-
+    /*
     if( _vm.count("help") ){
         std::cout << _opt_desc << std::endl;
         exit(1);
     }
+    */
 }
 
 const po::variable_value & ArgParser::operator[](const string& vname){

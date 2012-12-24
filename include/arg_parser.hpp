@@ -42,14 +42,16 @@ namespace po = boost::program_options;
 class ArgParser : boost::noncopyable
 {
   public:
-    explicit ArgParser( po::options_description& opt_desc );
+    explicit ArgParser( po::options_description& opt_desc, po::positional_options_description& pos_opt_desc );
     ~ArgParser();
 
     int parse_args( int argc, char **argv );
     const po::variable_value& operator[](const string& vname);
     bool isPresent(const string& vname);
+    
   private:
     po::options_description _opt_desc;
+    po::positional_options_description _pos_opt_desc;
     po::variables_map _vm;
 };
 #endif /** ARG_PARSER_HPP */

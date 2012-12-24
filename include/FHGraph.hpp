@@ -133,7 +133,7 @@ public:
         vector<size_t> tailInds; tailInds.reserve(tail.size());
         for( const auto& t : tail ) {
             auto v = _vBiMap.right.find(t);
-            if ( v == _vBiMap.right.end() ) { abort(); }
+            if ( v == _vBiMap.right.end() ) { throw tail; }//abort(); }
             tailInds.push_back( v->second );
         }
         //sort( tailInds.begin(), tailInds.end() );
@@ -160,6 +160,7 @@ public:
     }
     const HyperEdge& edge( const size_t& eid ) const {return _edgeList[eid]; } // (_eBiMap.left.begin()+eid)->second;}
 
+    const bool contains( const FlipKey& k ) const { return (_vBiMap.right.find(k) != _vBiMap.right.end()); }
     const size_t& index( const FlipKey& k ) const { return (_vBiMap.right.find(k)->second); }
 
     size_t order() const { return _vBiMap.size(); }

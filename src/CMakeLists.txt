@@ -23,7 +23,6 @@ LINK_DIRECTORIES(
   /opt/local/lib
   /usr/local/lib
   /opt/local/lib/gcc47
-  ${PROJECT_ROOT}/lib
 )
 
 LINK_LIBRARIES( m pthread ${Boost_LIBRARIES} bpp-core bpp-phyl bpp-seq
