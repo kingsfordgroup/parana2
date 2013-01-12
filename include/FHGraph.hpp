@@ -133,7 +133,7 @@ public:
         vector<size_t> tailInds; tailInds.reserve(tail.size());
         for( const auto& t : tail ) {
             auto v = _vBiMap.right.find(t);
-            if ( v == _vBiMap.right.end() ) { throw tail; }//abort(); }
+            if ( v == _vBiMap.right.end() ) { throw t; }//abort(); }
             tailInds.push_back( v->second );
         }
         //sort( tailInds.begin(), tailInds.end() );

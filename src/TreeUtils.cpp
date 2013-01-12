@@ -1,8 +1,10 @@
 #include "TreeUtils.hpp"
 #include "MultiOpt.hpp"
 #include <boost/heap/fibonacci_heap.hpp>
-
+#include <boost/heap/pairing_heap.hpp>
+#include <Bpp/Phyl/Io/Nhx.h>
 using boost::heap::fibonacci_heap;
+using boost::heap::pairing_heap;
 
 namespace Utils {
 
@@ -147,33 +149,33 @@ namespace Utils {
 
 
     namespace Trees {
-        typedef unique_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
+        typedef shared_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
 
 
         bool differentExtantNetworks( const TreeInfo& tinfo, int u, int v ) {
+            //auto specU = dynamic_cast< bpp::BppString* >(tinfo.tree->getNodeProperty(u, "S"))->toSTL();
+            //auto specV = dynamic_cast< bpp::BppString* >(tinfo.tree->getNodeProperty(v, "S"))->toSTL();
+            //return specU != specV;
             if ( u == v ) { return false; }
-            for (auto uit = tinfo.enets.find(u)->second.cbegin(); uit != tinfo.enets.find(u)->second.cend(); ++uit) {
-                if ( tinfo.enets.find(v)->second.find(*uit) != tinfo.enets.find(v)->second.cend() ) {
-                    return false;
-                }
+            auto& enetsU = tinfo.enets.find(u)->second;
+            auto& enetsV = tinfo.enets.find(v)->second;
+            
+            for (auto uit = enetsU.cbegin(); uit != enetsU.cend(); ++uit) {
+                if ( enetsV.find(*uit) != enetsV.cend() ) { return false; }
             }
             return true;
         }
 
-
-        void labelTree( const TreePtrT& tree ) {
-            for ( auto nid : tree->getNodesId() ) {
-                for ( auto prop : tree->getBranchPropertyNames(nid) ) {
-                    tree->setNodeName(nid, reinterpret_cast<bpp::BppString*>(tree->getBranchProperty(nid,prop))->toSTL() );
-                }
-            }
-        }
-
         TreePtrT readNewickTree( const std::string& treeName ) {
-            unique_ptr<bpp::Newick> newickReader( new bpp::Newick(true,true) ); //No comment allowed!
-            newickReader->enableExtendedBootstrapProperty("name");
+            unique_ptr<bpp::Nhx> newickReader( new bpp::Nhx(true) ); //No comment allowed!
+            //newickReader->enableExtendedBootstrapProperty("name");
             try {
                 TreePtrT tree( newickReader->read(treeName) ); // Tree in file
+                for ( auto pn : tree->getNodePropertyNames( tree->getRootId()) ) {
+                    std::cerr << "property : " << pn << "\t";
+                    std::cerr << "value : " << dynamic_cast<bpp::BppString*>(tree->getNodeProperty(tree->getRootId(), pn))->toSTL() << "\n";
+                }
+
                 return tree;
             } catch(std::exception& e) {
                 cerr << "Caught Exception: [" << e.what() << "]\n";
@@ -183,17 +185,60 @@ namespace Utils {
 
 
         const std::string getName( TreePtrT& t, int nid) {
-            if (t->hasNodeName(nid)) {
+            if ( t->hasNodeProperty(nid,"GN") ) {
+                auto name = dynamic_cast<bpp::BppString*>( t->getNodeProperty(nid,"GN"))->toSTL();
+                return name;
+            } else if (t->hasNodeName(nid)) {
                 return t->getNodeName(nid);
-            } else {
-                return reinterpret_cast<bpp::BppString*>( t->getNodeProperty(nid,"name"))->toSTL();
+            }
+        }
+
+        void labelTree( TreePtrT& tree ) {
+            for ( auto nid : tree->getNodesId() ) {
+                tree->setNodeName(nid, getName(tree, nid) );
             }
         }
 
         string getExtantNetwork(const string& s) {
             return ( s.find("LOST") != string::npos ) ? "LOST" : s.substr( s.find_last_of('_') );
-        };
+        }
 
+        string getSpeciesName(const TreePtrT& t, int nid) {
+            return dynamic_cast<bpp::BppString*>( t->getNodeProperty(nid,"S") )->toSTL();
+        }
+
+        bool isDescendantSpecies(const TreeInfo& ti, int u, int v)  {
+
+            if ( ti.tree->isLeaf(v) ) { return false; }
+            auto sonIDs = ti.tree->getSonsId(v);
+
+            auto& subspecLV = ti.subspec.find(sonIDs[0])->second;
+            auto& subspecRV = ti.subspec.find(sonIDs[1])->second;
+            
+            auto specU = getSpeciesName(ti.tree, u);
+
+            auto res = ( (subspecLV.find( specU ) != subspecLV.end()) or 
+                         (subspecRV.find( specU ) != subspecRV.end()) );
+            return res;
+
+            /*
+            auto& enetsU = ti.enets.find(u)->second;
+            auto& enetsV = ti.enets.find(v)->second;
+
+            // If u has more descendant species than v, then it can't be a descendant of v
+            if (enetsU.size() > enetsV.size()) { return false; }
+
+            // Every species below u must be represented in v
+            for (auto uit = enetsU.cbegin(); uit != enetsU.cend(); ++uit) {
+                if ( enetsV.find(*uit) == enetsV.cend() ) { return false; }
+            }
+            return true;
+            */
+        }
+
+        bool sameSpecies(const TreePtrT& t, int u, int v) {
+            return getSpeciesName(t, u) == getSpeciesName(t, v);
+        }
 
         void prepareTree( TreePtrT& t, TreeInfo& ti, int nid ) {
             // if the current node is not the root
@@ -213,18 +258,20 @@ namespace Utils {
             if (t->isLeaf(nid)) {
                 ti.leaves[nid] = {nid};
                 ti.subnodes[nid] = {nid};
-                string enet = getExtantNetwork(getName(t,nid));
+                string enet = getSpeciesName(t,nid); //getExtantNetwork(getName(t,nid));
 
                 // Skip lost nodes
-                //ti.enets[nid] = { };
-                //if( enet != "LOST" ) { ti.enets[nid].insert(enet); }
-
+                ti.enets[nid] = {enet};
+                ti.subspec[nid] = {enet};
+                
                 // Consider lost nodes
-                ti.enets[nid] = { enet };
+                //ti.enets[nid] = {enet};
             } else {
                 ti.leaves[nid] = {};
                 ti.subnodes[nid] = { nid };
                 ti.enets[nid] = unordered_set<string>();
+                ti.subspec[nid] = { getSpeciesName(t,nid) };
+                //ti.enets[nid] = { getSpeciesName(t,nid) };
 
 
                 for ( auto cid : t->getSonsId(nid) ) {
@@ -235,6 +282,7 @@ namespace Utils {
                     for ( auto l : ti.leaves[cid] ) { ti.leaves[nid].insert(l); }
                     for ( auto l : ti.subnodes[cid] ) { ti.subnodes[nid].insert(l); }
                     for ( auto l : ti.enets[cid] ) { ti.enets[nid].insert(l); }
+                    for ( auto l : ti.subspec[cid] ) { ti.subspec[nid].insert(l); }
                 }
             }
         }
@@ -249,7 +297,7 @@ namespace Utils {
 template bool Utils::appendNext<MultiOpt::dvsT, MultiOpt::QueueCmp<MultiOpt::dvsT>>( double, const vector<size_t>&, const vector<size_t>& , vector<MultiOpt::dvsT>& , MultiOpt::QueueCmp<MultiOpt::dvsT>& , std::function< double(const vector<size_t>&) >& );
 
 
-typedef boost::heap::fibonacci_heap<MultiOpt::edvsT, boost::heap::compare<MultiOpt::QueueCmp<MultiOpt::edvsT>>> heapT;
+typedef boost::heap::pairing_heap<MultiOpt::edvsT, boost::heap::compare<MultiOpt::QueueCmp<MultiOpt::edvsT>>> heapT;
 template bool Utils::appendNextWithEdge<heapT>( const size_t&,
                                                 const vector<size_t>&,
                                                 const vector<size_t>& ,

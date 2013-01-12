@@ -1,6 +1,7 @@
 #ifndef MODEL_HPP
 #define MODEL_HPP
 
+#include <array>
 #include <vector>
 #include <unordered_map>
 #include <fstream>
@@ -19,11 +20,13 @@ private:
 	*/
 	typedef double ProbabilityT;
 	typedef std::tuple<bool,bool> FlipTupleT;
-	typedef std::unordered_map< FlipTupleT, std::unordered_map< FlipTupleT, ProbabilityT > > TransitionMapT;
+	//typedef std::unordered_map< FlipTupleT, std::unordered_map< FlipTupleT, ProbabilityT > > TransitionMapT;
+	typedef std::array< std::array<ProbabilityT,4>, 4> TransitionMapT;
 
 	const Utils::TreeInfo& _tinfo;
 	Utils::Trees::TreePtrT& _t;
 	TransitionMapT _prob;
+	//std::unique_ptr<bpp::DistanceMatrix> _distMat;
 
 	ProbabilityT _transitionProbability( const FlipKey& child, const FlipKey& parent, double dist ){
 		// ignore distance right now
@@ -34,26 +37,26 @@ private:
 		bool gainingEdge = (!parent.f()) and child.f();
 		bool keepingNoEdge  = (!parent.f()) and (!child.f());
 		if ( loosingEdge ) {
-			auto u = _prob[ FlipTupleT(true,true) ][ FlipTupleT(false,false) ];
+			auto u = _prob[ FlipState::both ][ FlipState::none];
 			return (u) / ((1.0 + 0.25 * std::exp( -5.0 * (dist - 1.5) ) ));
 		} else if ( keepingEdge ) {
-			auto u = _prob[ FlipTupleT(true,true) ][ FlipTupleT(false,false) ];
+			auto u = _prob[ FlipState::both ][ FlipState::none];
 			return 1.0 - ((u) / ((1.0 + 0.25 * std::exp( -5.0 * (dist - 1.5) ) )));
 		} else if ( gainingEdge ) {
-			auto u = _prob[ FlipTupleT(false,false) ][ FlipTupleT(true,true) ];
+			auto u = _prob[ FlipState::none ][ FlipState::both];
 			return (u)/((1.0+ std::exp(-3.0*(dist-1.5))));
 		} else if ( keepingNoEdge ) {
-			auto u = _prob[ FlipTupleT(false,false) ][ FlipTupleT(true,true) ];
+			auto u = _prob[ FlipState::none ][ FlipState::both];
 			return 1.0 - (u)/((1.0+ std::exp(-3.0*(dist-1.5))));
 		}
 	}
 	
 	void _readUndirectedModel( std::ifstream& ifile ) {
 		// 0->0, 0->1, 1->0, 1->1
-		std::vector<bool> tf{false, true};
+		std::vector<FlipState> tf{FlipState::none, FlipState::both};
 		for ( const auto& e0 : tf ) {
 			for ( const auto& e1 : tf ) {
-				ifile >> _prob[FlipTupleT(e0,e0)][FlipTupleT(e1,e1)];
+				ifile >> _prob[e0][e1];
 			}
 		}
 	}
@@ -63,12 +66,13 @@ private:
 		// 01->00, 01->01, 01->10, 01->11
 		// 10->00, 10->01, 10->10, 10->11
 		// 11->00, 11->01, 11->10, 11->11
-		std::vector<bool> tf{true, false};
+		std::vector<FlipState> tf{FlipState::none, FlipState::both};
 		for ( const auto& f0 : tf ) {
 			for ( const auto& r0 : tf ) {
 				for ( const auto& f1 : tf ) {
 					for ( const auto& r1 : tf ) {
-						ifile >> _prob[FlipTupleT(f0,r0)][FlipTupleT(f1,r1)];
+						//ifile >> _prob[FlipTupleT(f0,r0)][FlipTupleT(f1,r1)];
+						ifile >> _prob[f0][f1];
 					}
 				}
 			}
@@ -93,6 +97,9 @@ public:
 	    _tinfo(tinfo), _t(t) {
 		std::cerr << "Reading from file\n";
 		_readModelFromFile(mfile);
+		//std::cerr << "computing distance matrix . . .";
+		//_distMat.reset( bpp::TreeTools::getDistanceMatrix( *_t.get() ) );
+		//std::cerr << "done\n";
 	}
 	
 	ProbabilityT leafProbability( const FlipKey& leaf, const FlipKey& obs ) {
@@ -117,8 +124,9 @@ public:
 
 
 		//auto dist = _t->getDistanceToFather(cnode);//1.0;
-		auto dist = bpp::TreeTools::getDistanceBetweenAnyTwoNodes( *_t.get(), onode, cnode);
-		//auto dist = 1.0;
+		//auto dist = bpp::TreeTools::getDistanceBetweenAnyTwoNodes( *_t.get(), onode, cnode);
+		//auto dist = _distMat->operator()(onode, cnode);
+		auto dist = 1.0;
 
 		//auto dist = _tinfo.intervalDistance(pnode, cnode);
 

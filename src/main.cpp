@@ -11,8 +11,10 @@
 #include <cstdlib>
 
 /** Boost Includes */
+#include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/progress.hpp>
+#include <boost/format.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <boost/lexical_cast.hpp>
@@ -44,6 +46,7 @@
 // The logger
 #include "cpplog.hpp"
 #include "model.hpp"
+#include "PhyloXMLParser.hpp"
 
 /** Namespace uses */
 using std::string;
@@ -64,6 +67,10 @@ using bpp::Newick;
 using bpp::NexusIOTree;
 using bpp::Tree;
 using bpp::Exception;
+using boost::filesystem::path;
+using boost::filesystem::exists;
+using boost::filesystem::is_directory;
+using boost::filesystem::create_directories;
 using boost::adjacency_list;
 using boost::graph_traits;
 using boost::vecS;
@@ -140,6 +147,7 @@ int main( int argc, char **argv ) {
     // The general options are relevant to either method
     po::options_description general("Genearal Options");
     general.add_options()
+    ("cross,c", po::value< bool >()->zero_tokens(), "perform a cross-validation on the extant edges")
     ("target,t", po::value< string >(), "extant graph file")
     ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
     ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
@@ -205,41 +213,78 @@ int main( int argc, char **argv ) {
         size_t k = ap["numOpt"].as<size_t>();
 
         std::cerr << "[creation] : [deletion] ratio is [" << creationCost << "] : [" << deletionCost << "]\n";
+        std::cerr << "TimePenalty is [" << penalty << "]\n";
         std::cerr << "Considering top " << k << " cost classes\n";
 
         LOG_INFO(log) << "Input graph is " << (undirected  ? "Undirected" : "Directed") << "\n";
         try {
+            PhyloXMLParser parser(treeNames[0]);
 
-            TreePtrT tree ( Utils::Trees::readNewickTree(treeNames[0]) );
+            //TreePtrT tree ( Utils::Trees::readNewickTree(treeNames[0]) );
+            TreePtrT tree ( parser.parse() );
+
+            
+            TreePtrT tree2;
 
             if ( treeNames.size() > 1 ) {
-                auto tree2 = Utils::Trees::readNewickTree(treeNames[1]).release();
-                auto node = new bpp::Node("#preroot#");
+
+                PhyloXMLParser t2parser(treeNames[1]);
+                auto del = [](TreePtrT::element_type* e) { /*do nothing deleter*/ };
+                tree2.reset( t2parser.parse(), del );
+                
+                auto nodeName = "#preroot#";
+                auto node = new bpp::Node(nodeName);
+
+                bpp::BppString specName("#prspec#");
+                node->setNodeProperty("S", specName);
+                assert( dynamic_cast<bpp::BppString*>(node->getNodeProperty("S"))->toSTL() == "#prspec#" );
+
+                // This is a speciation event
+                node->setNodeProperty("D", bpp::BppString("F") );
+                assert( dynamic_cast<bpp::BppString*>(node->getNodeProperty("D"))->toSTL() == "F" );
+
+                auto nodeString = new bpp::BppString(nodeName);
+                node->setNodeProperty("GN", bpp::BppString(nodeName));
+                assert( dynamic_cast<bpp::BppString*>(node->getNodeProperty("GN"))->toSTL() == nodeName );
+
                 auto r1 = tree->getRootNode();
                 auto r2 = tree2->getRootNode();
 
                 // relationship with tree 1
                 node->addSon(0, tree->getRootNode());
+                r1->setDistanceToFather(0.0);
+
                 // relationship with tree 2
                 node->addSon(1, tree2->getRootNode());
+                r2->setDistanceToFather(0.0);
 
                 // root the tree at our new node
                 tree->setRootNode(node);
-                LOG_INFO(log) << "rerooted\n";
+                std::cerr << "rerooted\n";
                 // relabel all of the nodes
+                std::cerr << "before relabel tree has " << tree->getNodesId().size() << " nodes\n";
                 tree->resetNodesId();
-                LOG_INFO(log) << "relabeled\n";
+                std::cerr << "relabeled\n";
+                std::cerr << "after relabel tree has " << tree->getNodesId().size() << " nodes\n";
 
+                std::cerr << "before\n";
                 auto rootId = tree->getRootId();
+                std::cerr << "after\n";
                 // set the name of the root
                 tree->setNodeName( rootId, "#preroot#");
                 tree->setVoidBranchLengths(0.0);
+                std::cerr << "tree = " << tree << "\n";
+                std::cerr << "right before scope exit tree has " << tree->getNodesId().size() << " nodes\n";
             }
-
+            std::cerr << "tree = " << tree << "\n";
+            std::cerr << "right after scope exit tree has " << tree->getNodesId().size() << " nodes\n";
+            std::cerr << "before label\n";
+            std::cerr << "there are " << tree->getNodesId().size() << " nodes\n";
             // put the node names on all the nodes
             Utils::Trees::labelTree(tree);
+            std::cerr << "after label\n";
 
-            TreeInfo tinfo("TreeInfo");
+            TreeInfo tinfo("TreeInfo", tree);
             auto rId = tree->getRootId();
 
             vector<FlipKey> keyList;
@@ -367,7 +412,9 @@ int main( int argc, char **argv ) {
 
             } else if ( method == "pars" ) { // Using parsimony algo.
 
-                auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, deletionCost, penalty, directed );
+                auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, 
+                                                            deletionCost, penalty, 
+                                                            directed, MultiOpt::DerivationType::AllHistories );
 
                 auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
                 auto rootInd = H->index(rootKey);
@@ -375,12 +422,13 @@ int main( int argc, char **argv ) {
                 vector<size_t> order; order.reserve( H->order() );
                 MultiOpt::topologicalOrder( H, tree, tinfo, order );
 
+                auto performReconstruction = [&]( const std::string& outputFileName ) -> bool {
                 MultiOpt::slnDictT slnDict;
                 //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
                 if ( undirected ) {
-                    MultiOpt::leafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
                 } else {
-                    MultiOpt::leafCostDict( H, tree, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
                 }
 
                 //auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
@@ -429,18 +477,109 @@ int main( int argc, char **argv ) {
 
                     exit(0);
                     MultiOpt::lazyKthBest( H, rootInd, k, k, derivs );
-                    MultiOpt::computePosteriors(H, tree, order, derivs, outputName, keyList, beta);
+                    MultiOpt::computePosteriors(H, tree, order, derivs, outputFileName, keyList, beta);
                 } else {
                     if ( ap.isPresent("old") ) {
                         LOG_INFO(log) << "Old algo\n";
-                        MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                        MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
                     } else {
                         LOG_INFO(log) << "New algo\n";
                         // eager
-                        MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputName, keyList, beta);
+                        MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
+                        LOG_INFO(log) << "DONE\n";
                     }
                 }
+            }; // end of reconstruction function
+
+            auto doCrossValidation = ap.isPresent("cross");
+            path outputPath(outputName);
+            switch (doCrossValidation) {
+                case true:
+                  // Check if the cross validation directory exists
+                  if ( exists(outputPath) ) {
+                    if ( !is_directory(outputPath) ) { 
+                        std::cerr << "The path given for cross validation output [" << outputPath << 
+                                  "] is not a directory\n";
+                    }
+                  } else {
+                    if (!create_directories(outputPath)) {
+                        std::cerr << "Could not create the cross validation output directory [ " <<
+                                      outputPath << "]\n";
+                    }
+                  }
+
+                  if ( undirected ) {
+                    auto& Graph = get<undirectedGraphT>(G);
+                    typedef typename boost::graph_traits< undirectedGraphT >::edge_descriptor EdgeT;
+                    typedef typename boost::graph_traits< undirectedGraphT >::vertex_descriptor VertexT;
+                    typedef typename boost::graph_traits< undirectedGraphT >::edge_iterator EdgeItT;
+                    EdgeItT eit, eend;
+                    std::tie(eit, eend) = boost::edges( Graph );
+                    std::vector< std::tuple<VertexT,VertexT> > edges;
+                    edges.reserve( std::distance(eit, eend) );
+                    for ( eit; eit != eend; ++eit ) {
+                        edges.push_back(make_tuple( boost::source(*eit,Graph), boost::target(*eit, Graph) ));
+                    }
+
+                    VertexT u,v;
+                    for( auto& uv : edges ) {
+                        std::tie(u,v) = uv;
+                        EdgeT edge; bool exists;
+                        std::tie(edge,exists) = boost::edge(u,v,Graph);
+                        auto weight = Graph[edge].weight;
+                        // Remove the edge from the graph
+                        boost::remove_edge(u,v,Graph);
+
+                        // Perform the reconstruction
+                        auto nameU = Graph[u].name; auto nameV = Graph[v].name;
+                        auto reconFileName = boost::str( boost::format("%1%/removed@%2%#%3%@txt") % outputName % nameU % nameV );
+                        performReconstruction( reconFileName );
+
+                        // Add the edge back to the graph
+                        std::tie(edge, exists) = boost::add_edge(u,v,Graph);
+                        Graph[edge].weight = weight;
+                    }
+
+                  } else { // The input graph is undirected
+                    auto& Graph = get<directedGraphT>(G);
+                    typedef typename boost::graph_traits< directedGraphT >::edge_descriptor EdgeT;
+                    typedef typename boost::graph_traits< directedGraphT >::vertex_descriptor VertexT;
+                    typedef typename boost::graph_traits< directedGraphT >::edge_iterator EdgeItT;
+                    EdgeItT eit, eend;
+                    std::tie(eit, eend) = boost::edges( Graph );
+                    std::vector< std::tuple<VertexT,VertexT> > edges;
+                    edges.reserve( std::distance(eit, eend) );
+                    for ( eit; eit != eend; ++eit ) {
+                        edges.push_back(make_tuple( boost::source(*eit,Graph), boost::target(*eit, Graph) ));
+                    }
+
+                    VertexT u,v;
+                    for( auto& uv : edges ) {
+                        std::tie(u,v) = uv;
+                        EdgeT edge; bool exists;
+                        std::tie(edge,exists) = boost::edge(u,v,Graph);
+                        auto weight = Graph[edge].weight;
+                        // Remove the edge from the graph
+                        boost::remove_edge(u,v,Graph);
+
+                        // Perform the reconstruction
+                        auto nameU = Graph[u].name; auto nameV = Graph[v].name;
+                        auto reconFileName = boost::str( boost::format("%1%/removed@%2%#%3%@txt") % outputName % nameU % nameV );
+                        performReconstruction( reconFileName );
+
+                        // Add the edge back to the graph
+                        std::tie(edge, exists) = boost::add_edge(u,v,Graph);
+                        Graph[edge].weight = weight;
+                    }
+                  }
+                  break;
+
+                case false:
+                  performReconstruction( outputName );
+                  break;
             }
+        }
+
         } catch (const Exception &e) {
             LOG_ERROR(log) << "Error when reading tree : " << e.what() << endl;
         }

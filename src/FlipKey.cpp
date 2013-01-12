@@ -5,29 +5,51 @@
 #include <boost/functional/hash.hpp>
 #include "FlipKey.hpp"
 
+void swapEndpoints( MustConnect& c ) {
+    switch (c) {
+        case MustConnect::left :
+          c = MustConnect::right;
+        case MustConnect::right :
+          c = MustConnect::left;
+    }
+}
+
+FlipKey::FlipKey( int u, int v, FlipState s, MustConnect c ) :
+    _nodes( u < v ? NodeTupT(u,v) : NodeTupT(v,u)  ),
+    _state(s), _connect(c) {
+        if ( u > v ) { std::cerr << "swapping connect states\n"; swapEndpoints(_connect); }
+    }
+
 FlipKey::FlipKey( int u, int v, FlipState s, bool connectU, bool connectV ) :
     _nodes( u < v ? NodeTupT(u,v) : NodeTupT(v,u)  ),
-    _state(s), _connectU(connectU), _connectV(connectV) {
-        if ( u > v ) { std::cerr << "swapping connect states\n"; std::swap(_connectU, _connectV); }
+    _state(s) {
+        if ( u > v ) { std::cerr << "swapping connect states\n"; std::swap(connectU, connectV); }
+        if ( connectU and connectV ) { _connect = MustConnect::both; }
+        else if ( connectU and !connectV ) { _connect = MustConnect::left; }
+        else if ( !connectU and connectV ) { _connect = MustConnect::right; }
+        else if ( !connectU and !connectV ) { _connect = MustConnect::none; }
     }
 
 FlipKey::FlipKey( int u, int v, bool f, bool r, bool connectU, bool connectV ) :
-    _nodes( u < v ? NodeTupT(u,v) : NodeTupT(v,u)  ),
-    _connectU(connectU), _connectV(connectV) {
+    _nodes( u < v ? NodeTupT(u,v) : NodeTupT(v,u)  ) {
         if ( f and r ){ _state = FlipState::both; }
-        if ( f and !r ){ _state = FlipState::forward; }
-        if ( !f and r ){ _state = FlipState::reverse; }
-        if ( !f and !r ){ _state = FlipState::none; }
-        if ( u > v ) { std::cerr << "swapping connect states\n"; std::swap(_connectU, _connectV); }
+        else if ( f and !r ){ _state = FlipState::forward; }
+        else if ( !f and r ){ _state = FlipState::reverse; }
+        else if ( !f and !r ){ _state = FlipState::none; }
+        
+        if ( u > v ) { std::cerr << "swapping connect states\n"; std::swap(connectU, connectV); }
+        if ( connectU and connectV ) { _connect = MustConnect::both; }
+        else if ( connectU and !connectV ) { _connect = MustConnect::left; }
+        else if ( !connectU and connectV ) { _connect = MustConnect::right; }
+        else if ( !connectU and !connectV ) { _connect = MustConnect::none; }
     }
 
 FlipKey::FlipKey( const FlipKey& o ) :
-    _nodes( NodeTupT(o.u(), o.v()) ), _state(o.state()), _connectU(o.connectU()), _connectV(o.connectV()) {}
+    _nodes( NodeTupT(o.u(), o.v()) ), _state(o.state()), _connect(o.mustConnect()) {}
 
 
 bool FlipKey::operator == (const FlipKey& other) const {
-    return (_nodes == other._nodes) && (_state == other._state) && 
-           (_connectU == other._connectU) && (_connectV == other._connectV);
+    return (_nodes == other._nodes) && (_state == other._state) && (_connect == other._connect);
 }
 
 bool FlipKey::operator != (const FlipKey& other) const {
@@ -45,18 +67,21 @@ int FlipKey::v() const { return get<1>(_nodes);}
 bool FlipKey::f() const { return (_state == FlipState::forward or _state == FlipState::both); }
 bool FlipKey::r() const { return (_state == FlipState::reverse or _state == FlipState::both); }
 FlipState FlipKey::state() const { return _state; }
-bool FlipKey::connectU() const { return _connectU; }
-bool FlipKey::connectV() const { return _connectV; }
+MustConnect FlipKey::mustConnect() const { return _connect; }
+bool FlipKey::connectU() const { 
+    return (_connect == MustConnect::left or _connect == MustConnect::both); }
+
+bool FlipKey::connectV() const { 
+    return (_connect == MustConnect::right or _connect == MustConnect::both); }
 
 std::size_t FlipKey::hashCode() const {
     std::hash<int> h;
-    return (h( get<0>(_nodes) ) + h( get<1>(_nodes) )) + _state  + 
-           (_connectU ? 2 : 0) + (_connectV ? 1 : 0);
+    return (h( get<0>(_nodes) ) + h( get<1>(_nodes) )) + _state  + static_cast<uint32_t>(_connect);
 }
 
-FlipKey flipBoth( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsBoth[k.state()], k.connectU(), k.connectV() ); }
-FlipKey flipForward( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsForward[k.state()], k.connectU(), k.connectV() ); }
-FlipKey flipReverse( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsReverse[k.state()], k.connectU(), k.connectV() ); }
+FlipKey flipBoth( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsBoth[k.state()], k.mustConnect() ); }
+FlipKey flipForward( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsForward[k.state()], k.mustConnect() ); }
+FlipKey flipReverse( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsReverse[k.state()], k.mustConnect() ); }
 
 ostream& operator<<(ostream& output, const FlipKey& flip) {
         string flipStr;
@@ -71,8 +96,20 @@ ostream& operator<<(ostream& output, const FlipKey& flip) {
               flipStr = "X"; break;
         }
 
+        string connectStr;
+        switch ( flip._connect ) {
+            case MustConnect::both:
+              connectStr = "(1,1)"; break;
+            case MustConnect::left:
+              connectStr = "(1,0)"; break;
+            case MustConnect::right:
+              connectStr = "(0,1)"; break;
+            case MustConnect::none:
+              connectStr = "(0,0)"; break;
+        }
+
         output << "[" << get<0>(flip._nodes) << ", " << get<1>(flip._nodes) <<  "]" << " : " << flipStr << 
-                  "(" << flip._connectU << ", " << flip._connectV << ")";
+                  connectStr;
         return output;
     }
 

@@ -11,6 +11,13 @@ using std::make_tuple;
 using std::string;
 using std::get;
 
+enum class MustConnect: uint32_t {
+    none=0,
+    left=1,
+    right=2,
+    both=3
+};
+
 enum FlipState: uint32_t {
     none=0,
     forward=1,
@@ -35,6 +42,8 @@ static const FlipState fsReverse[] = {
     FlipState::forward  // <->: ->
 };
 
+void swapEndpoints( MustConnect& c );
+
 class FlipKey {
 public:        
     typedef tuple<int,int> NodeTupT;
@@ -42,7 +51,8 @@ public:
 
     friend ostream& operator<<(ostream& output, const FlipKey& flip);
 
-    FlipKey( int u, int v, FlipState t, bool connectU=false, bool connectV=false );
+    FlipKey( int u, int v, FlipState t, MustConnect c=MustConnect::none );
+    FlipKey( int u, int v, FlipState t, bool connectU, bool connectV );
     FlipKey( int u, int v, bool f, bool r, bool connectU=false, bool connectV=false );
     FlipKey( const FlipKey& o );
 
@@ -59,6 +69,7 @@ public:
     bool f() const;
     bool r() const;
     FlipState state() const;
+    MustConnect mustConnect() const;
     bool connectU() const;
     bool connectV() const;
 
@@ -68,7 +79,8 @@ private:
     NodeTupT _nodes;
     FlipState _state;
     //bool _f, _r;
-    bool _connectU, _connectV;
+    //bool _connectU, _connectV;
+    MustConnect _connect;
 };
 
 

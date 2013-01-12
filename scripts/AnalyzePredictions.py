@@ -1,3 +1,15 @@
+"""AnalyzePredictions
+
+Usage:
+  AnalyzePredictions.py --gtruth=<gtdir> --other=<odir> --parana=<pfile>
+
+Options:
+  -g, --gtruth=<gtdir>     The directory containing the ground truth networks.
+  -o, --other=<odir>       The directory containing the predictions of the other method.
+  -p, --parana=<pfile>     The PARANA output file.
+"""
+from docopt import docopt
+
 import networkx as nx
 import numpy as np
 import glob
@@ -6,9 +18,14 @@ import croc
 import sys
 import argparse
 import evaluation
+from util import allPairs
 from collections import namedtuple
 
 def graphWithCutoff( fname, cutoff=0.0 ):
+    '''
+    Reads in the PARANA format file 'fname' and returns a graph 
+    containing all edges with weight >= cutoff.
+    '''
     edges = []
     with open(fname) as ifile:
         for l in ifile:
@@ -17,6 +34,32 @@ def graphWithCutoff( fname, cutoff=0.0 ):
     G = nx.Graph()
     G.add_weighted_edges_from( [ e for e in edges if e[2] > cutoff ] )
     return G
+
+def filterGraphWithCutoff(G, cutoff=0.5):
+    '''
+    Returns a new graph on the same node set as 'G', but removing any edges
+    with a weight < 'cutoff'.
+    '''
+    G2 = nx.Graph()
+    G2.add_nodes_from(G.nodes())
+    for u,v,d in G.edges_iter(data=True):
+        if d['weight'] >= cutoff:
+            G2.add_edge(u,v)
+    return G2
+
+def filteredGraph(G, nodes, cutoff=0.5):
+    '''
+    Returns a new graph G', on the node set 'nodes' having 
+    only those edges in nodes X nodes that exist in G 
+    with a weight >= cutoff.
+    '''
+    NG = nx.Graph()
+    NG.add_nodes_from(nodes)
+    for u,v in G.edges_iter():
+        if ((u in nodes) and (v in nodes)) and G[u][v]['weight'] >= cutoff :
+            NG.add_edge(u,v)
+    return NG
+
 
 def writeStatsToFile( gfname, sfname, tgraph ):
     """
@@ -30,74 +73,191 @@ def writeStatsToFile( gfname, sfname, tgraph ):
             ofile.write("{0} {1}\n".format( ParProbG[u][v]['weight'] if ParProbG.has_edge(u,v) else 0.0, 1 if tgraph.has_edge(u,v) else 0) )
 
 ROC_Results = namedtuple('ROC_Results', 'BEDROC, AUROC')
+CutoffPoint = namedtuple('CutoffPoint', ['cutoff', 'tp', 'tn', 'fp', 'fn', 'precision', 'recall', 'f1'], verbose=False)
 
-def getCurve( pgraph, tgraph ):
-    F = lambda sweep: croc.ROC(sweep).transform(croc.Linear())#Exponential(7.0))
+def F1Score(cutoff, tp, tn, fp, fn):
+    '''
+    Computes the F1-Score at the given cutoff.
+    '''
+    try:
+        precision = tp / float(tp+fp)
+        recall = tp / float(tp+fn)
+        f1 = 2.0 * ((precision*recall)/(precision+recall))
+        return CutoffPoint(cutoff,tp,tn,fp,fn,precision,recall,f1)
+    except ZeroDivisionError as detail:
+        return None
+
+def getPerformanceAtCutoff( pgraph, tgraph, cutoff ):
+    '''
+    Returns a (CutoffPoint, ROC_Results) pair where the information in the cutoff
+    point (e.g. the F1-Score) has been evaluated at the supplied 'cutoff'.
+    '''
     sd = croc.ScoredData()
-    for u,v in itertools.combinations( tgraph.nodes(), 2 ):
+    for u,v in allPairs( tgraph.nodes() ):
+        sd.add( pgraph[u][v]['weight'] if pgraph.has_edge(u,v) else 0.0, 1 if tgraph.has_edge(u,v) else 0)
+
+    sweep = list(sd.sweep_threshold(tie_mode="smooth"))
+    
+    vals = []
+    for k,v in sd.score_labels.iteritems():
+        vals = vals + [ (k,x) for x in v ]
+
+    vals = sorted(vals, key = lambda x: x[0], reverse=True)
+
+    l = len(vals)    
+    bestCutoff = CutoffPoint(cutoff=0.0, tp=0, tn=0, fp=0, fn=0, precision=0.0, recall=0.0, f1=0.0)
+    for i,(tp,tn,fp,fn) in enumerate(sweep):
+        if vals[i+1][0] < cutoff:
+            c = vals[i][0]
+            bestCutoff = F1Score(c, tp, tn, fp, fn)
+            break
+
+    F = lambda sweep: croc.ROC(sweep).transform(croc.Linear())
+    C = F(sweep)
+    return (bestCutoff, ROC_Results( BEDROC=croc.BEDROC(sd, 20.0)['BEDROC'], AUROC=C.area() ))
+
+
+def getOptimalCutoff( pgraph, tgraph ):
+    '''
+    Return a CutoffPoint that contains the optimal cutoff for this predictor
+    (i.e. the cutoff at which the F1-Score is the highest).
+    '''
+    sd = croc.ScoredData()
+    for u,v in allPairs( tgraph.nodes() ):
         sd.add( pgraph[u][v]['weight'] if pgraph.has_edge(u,v) else 0.0, 1 if tgraph.has_edge(u,v) else 0 )
 
-    C = F(sd.sweep_threshold(tie_mode="smooth"))
+    sweep = sd.sweep_threshold(tie_mode="smooth")
+    vals = []
+    for k,v in sd.score_labels.iteritems():
+        vals = vals + [ (k,x) for x in v ]
+    vals = sorted(vals, key = lambda x: x[0], reverse=True)
+
+    def F1Score(cutoff, tp, tn, fp, fn):
+        try:
+            precision = tp / float(tp+fp)
+            recall = tp / float(tp+fn)
+            f1 = 2.0 * ((precision*recall)/(precision+recall))
+            return CutoffPoint(cutoff,tp,tn,fp,fn,precision,recall,f1)
+        except ZeroDivisionError as detail:
+            return None
+
+    l = len(vals)
+    bestCutoff = CutoffPoint(cutoff=0.0, tp=0, tn=0, fp=0, fn=0, precision=0.0, recall=0.0, f1=0.0)
+    for i,(tp,tn,fp,fn) in enumerate(sweep):
+        if i < l:
+            c = vals[i][0]            
+            currentCutoff = F1Score(c, tp, tn, fp, fn)
+            if (currentCutoff is None): continue
+            if (currentCutoff.f1 >= bestCutoff.f1 or bestCutoff.cutoff == 0.0):
+                bestCutoff = currentCutoff
+
+    return bestCutoff.cutoff, bestCutoff.f1
+
+def getCurve( pgraph, tgraph ):
+    '''
+    Gets the BEDROC and AUROC scores for the given prediction.
+    '''
+    F = lambda sweep: croc.ROC(sweep).transform(croc.Linear())
+    sd = croc.ScoredData()
+    for u,v in allPairs( tgraph.nodes() ):
+        sd.add( pgraph[u][v]['weight'] if pgraph.has_edge(u,v) else 0.0, 1 if tgraph.has_edge(u,v) else 0 )
+
+    sweep = sd.sweep_threshold(tie_mode="smooth")
+    C = F(sweep)
     return ROC_Results( BEDROC=croc.BEDROC(sd, 20.0)['BEDROC'], AUROC=C.area() )
 
-def createParser():
-    parser = argparse.ArgumentParser(prog="./AnalyzePredictions")
-    parser.add_argument("-g", "--gtruth", default=None, help="Directory containing ground truth networks")
-    parser.add_argument("-o", "--other", default=None, help="Directory containing other predicitons")
-    parser.add_argument("-p", "--parana", default=None, help="File containing PARANA predictions")
-    return parser
-
-def filteredGraph(G, nodes, cutoff=0.5):
-    NG = nx.Graph()
-    for u,v in G.edges_iter():
-        if ((u in nodes) and (v in nodes)) and G[u][v]['weight'] > cutoff :
-            NG.add_edge(u,v)
-    return NG
-
-def findSuggestedCutoff( I, G, cut ):
-
-    SI = I.subgraph(G.nodes())
+def findSuggestedCutoff( I, cut ):
+    '''
+    Returns the cutoff of edge weights on the graph 'I' at which
+    'cut' fraction of all the edge weight mass is included.  For example,
+    if cut is 0.9 and S is the sum of edge weights of I, this functio will
+    return the smallest cutoff of edge weights where the graph generated
+    by this cutoff contains a mass of at least 0.9 * S.
+    '''
+    #SI = I.subgraph(G.nodes())
     sw = sorted( [d['weight'] for u,v,d in I.edges_iter(data=True)], reverse=True )
     s = sum(sw)
     sums = np.array([ sum( sw[:i] ) / s for i in xrange(1,len(sw)) ])
     return sw[ np.where(sums > cut)[0][0] ]
 
-def main():
-    parser = createParser()
-    options = parser.parse_args()
+def printPerf(methodName, perf, roc):
+    '''
+    Print the performance statistics for the given method.
+    '''
+    print("{:-^40}".format("Method : "+methodName))
+    print("Precision = {0}, Recall = {1}, F1-Score = {2}".format(perf.precision, perf.recall, perf.f1))
+    print("BEDROC: {0}".format(roc.BEDROC))
 
-    gtGraphNames = glob.glob("{0}/*.sim.cut".format(options.gtruth))
-    gtGraphs = { fn.split("/")[-1][:-8] : nx.read_edgelist(fn) for fn in gtGraphNames }
-    print(gtGraphs)
-    print(gtGraphNames)
 
-    oGraphNames = [ "{0}/{1}.out.ppi".format(options.other, k) for k in gtGraphs.keys() ]
+def main(options):
+    print(options)
+    gtruth = options['--gtruth']
+    other = options['--other']
+    parana = options['--parana']
+
+    # The ground truth graphs (obtained from sequence similarity)
+    gtGraphNames = glob.glob("{0}/*.prob".format(gtruth))
+    
+    """
+    Dictionary mapping each species name to it's ground truth graph
+    The ground truth graph is obtained by filtering the ".prob" graph 
+    which contains a non-zero probability for each potential edge
+    with a cutoff of 0.5.  This ensures we keep all of the nodes, even if they have no
+    incident edges
+    """
+    gtGraphs = { fn.split("/")[-1][:-5] : \
+                 filterGraphWithCutoff(nx.read_weighted_edgelist(fn)) for fn in gtGraphNames }
+
+    """
+    The graphs that are the output of the other program (in this case Pinney et al.).
+    They have the same name as the ground truth files above except '.prob' is replaced
+    with '.out.ppi'.
+    """
+    oGraphNames = [ "{0}/{1}.out.ppi".format(other, k) for k in gtGraphs.keys() ]
     oGraphs = { fn.split("/")[-1][:-8] : nx.read_weighted_edgelist(fn) for fn in oGraphNames }
-    inputGraphNames = glob.glob("{0}/bZIP*.cut".format(options.other))
-    print(inputGraphNames)
-    inputGraph = nx.read_edgelist(inputGraphNames[0])
-    print(oGraphNames)
 
-    cutoff = 0.99
-    paranaGraph = graphWithCutoff(options.parana, 0.0)
-    c = findSuggestedCutoff( paranaGraph, inputGraph, cutoff )
-    evaluation.printStats( filteredGraph(paranaGraph, inputGraph.nodes(), cutoff=c ), inputGraph )
-    print >>sys.stderr, "Parana 2.0    : {0}".format(getCurve(paranaGraph, inputGraph))
+    # Read in the Parana graph from the file    
+    paranaGraph = graphWithCutoff(parana, 0.0)
 
-
+    # inputGraphNames = glob.glob("{0}/bZIP*input.adj".format(options.other))
+    # inputGraph = nx.read_adjlist(inputGraphNames[0])
+    # print("input graph order = {0}, size = {1}".format(inputGraph.order(), inputGraph.size()))
+    # cutoff = 0.99
+    # c = findSuggestedCutoff( paranaGraph, inputGraph, cutoff )
+    # cOpt = getOptimalCutoff( paranaGraph, inputGraph )
+    # print("Optimal cutoff = {0}".format(cOpt))
+    # evaluation.printStats( filteredGraph(paranaGraph, inputGraph.nodes(), cutoff=c ), inputGraph )
+    # print >>sys.stderr, "Parana 2.0    : {0}".format(getCurve(paranaGraph, inputGraph))
 
     for gtName, gtGraph in gtGraphs.iteritems():
-        print(gtName)
-        c = 0.5#findSuggestedCutoff( paranaGraph, gtGraph, cutoff )
-        print("Parana cutoff = {0}".format(c))
-        print("==================")
-        evaluation.printStats( filteredGraph(oGraphs[gtName], gtGraph.nodes()), gtGraph )
-        print >>sys.stderr, "Pinney et. al : {0}".format(getCurve(oGraphs[gtName], gtGraph))
-        evaluation.printStats( filteredGraph(paranaGraph, gtGraph.nodes(), cutoff=c ), gtGraph )
-        print >>sys.stderr, "Parana 2.0    : {0}".format(getCurve(paranaGraph, gtGraph))
+
+        cutoff = 0.99 # 0.9999
+        c = findSuggestedCutoff( paranaGraph, cutoff ) 
+        # Find the best cutoff for the parana graph rather than 
+        # using the heuristic above
+        # bc, bf1 = getOptimalCutoff( paranaGraph, gtGraph )      
+        
+
+        specString = "Species : {0}".format(gtName)
+        print("{:=^80}".format(specString))
+        
+        (otherPerf, otherROC) = getPerformanceAtCutoff( oGraphs[gtName], gtGraph, 0.5 )
+        (paranaPerf, paranaROC) = getPerformanceAtCutoff( paranaGraph, gtGraph, c )
+        
+        printPerf("Pinney et al.", otherPerf, otherROC)
+        printPerf("Parana 2.0", paranaPerf, paranaROC)
+
+        # Old evaluation code
+        #evaluation.printStats( filteredGraph(oGraphs[gtName], gtGraph.nodes()), gtGraph )
+        #print >>sys.stderr, "Pinney et. al : {0}".format(getCurve(oGraphs[gtName], gtGraph))
+        
+        # Old evaluation code
+        #evaluation.printStats( filteredGraph(paranaGraph, gtGraph.nodes(), cutoff=c ), gtGraph )
+        #print >>sys.stderr, "Parana 2.0    : {0}".format(getCurve(paranaGraph, gtGraph))
+
         print("\n")
     sys.exit(0)
 
 if __name__ == "__main__" :
-
-    main()
+    arguments = docopt(__doc__, version="AnalyzePredictions 1.0")
+    main(arguments)

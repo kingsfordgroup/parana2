@@ -9,6 +9,7 @@
 #include <tuple>
 #include <Bpp/Phyl/Tree.h>
 #include <boost/heap/fibonacci_heap.hpp>
+#include <boost/heap/pairing_heap.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/topological_sort.hpp>
@@ -151,7 +152,7 @@ namespace MultiOpt {
     typedef CostClass<EdgeDerivInfoLazy> LazyCostClass;
     typedef CostClass<EdgeDerivInfoEager> EagerCostClass;
 
-    typedef std::unordered_map< size_t, boost::heap::fibonacci_heap<CountedDerivation, boost::heap::compare<CountedDerivCmp<CountedDerivation>>> > CandStoreT;
+    typedef std::unordered_map< size_t, boost::heap::pairing_heap<CountedDerivation, boost::heap::compare<CountedDerivCmp<CountedDerivation>>> > CandStoreT;
     typedef std::vector< std::vector<CostClass<EdgeDerivInfoLazy> > > DerivStoreT;
 
     typedef tuple<double, vector<size_t> > dvsT;
@@ -172,9 +173,10 @@ namespace MultiOpt {
     //typedef unordered_map< flipTupleT, unordered_map<bool, std::function<costRepT (const double&) > > > selfCostMapFunT;
     typedef array<array<std::function<costRepT (const double&) >,2>,4> selfCostMapFunT;
 
-    //    Google< tuple<size_t,size_t> >::Set recursedStore;
-    //    Google<size_t, vector<Derivation>*>::Map cand;
-
+    enum class DerivationType: uint32_t {
+      AllHistories=0,
+      OnlyTransitions=1
+    };
 
     class InOutProb {
     public:
@@ -220,11 +222,12 @@ namespace MultiOpt {
                                                             double cc,
                                                             double dc,
                                                             double penalty,
-                                                            bool directed );
+                                                            bool directed,
+                                                            DerivationType dtype);
 
 
     template< typename GT >
-    void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
+    void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, TreeInfo& ti, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
 
     template< typename GT >
     void MLLeafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
@@ -320,7 +323,7 @@ namespace MultiOpt {
 
     void lazyNext(
                   unique_ptr<ForwardHypergraph>& H,
-                  boost::heap::fibonacci_heap<edvsT, boost::heap::compare<CountedDerivCmp<edvsT>>>& localCandidates,
+                  boost::heap::pairing_heap<edvsT, boost::heap::compare<CountedDerivCmp<edvsT>>>& localCandidates,
                   size_t eind,
                   const vector<size_t>& j,
                   size_t kp,

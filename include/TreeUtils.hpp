@@ -34,6 +34,7 @@ namespace Utils {
     using std::endl;
     using std::vector;
     using std::unique_ptr;
+    using std::shared_ptr;
     using bpp::Newick;
     using bpp::Tree;
     using bpp::Exception;
@@ -42,18 +43,21 @@ namespace Utils {
 
     class TreeInfo {
     public:
+        typedef shared_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
         typedef unordered_map<int, unordered_set<string>> NodeMapT;
         typedef unordered_map<int, unordered_set<int>> NodeIndMapT;
         typedef unordered_map<int, tuple<double,double>> NodeIntervalMapT;
+        TreePtrT tree;
         NodeIndMapT subnodes;
         NodeIndMapT leaves;
         NodeMapT enets;
+        NodeMapT subspec;
         NodeIntervalMapT extantInterval;
         string name;
 
 
 
-       TreeInfo( const string n ) : name(n), subnodes(NodeIndMapT()),
+       TreeInfo( const string n, TreePtrT t ) : name(n), tree(t), subnodes(NodeIndMapT()),
                                      leaves(NodeIndMapT()),
                                      enets(NodeMapT()),
                                      extantInterval(NodeIntervalMapT()) { }
@@ -114,11 +118,15 @@ namespace Utils {
     */
 
     namespace Trees {
-        typedef unique_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
+        typedef shared_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
 
         bool differentExtantNetworks( const TreeInfo& tinfo, int u, int v );
 
-        void labelTree( const TreePtrT& tree );
+        void labelTree( TreePtrT& tree );
+
+        bool sameSpecies(const TreePtrT& t, int u, int v);
+
+        bool isDescendantSpecies(const TreeInfo& ti, int u, int v);
 
         TreePtrT readNewickTree( const std::string& treeName );
 
