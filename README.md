@@ -1,9 +1,17 @@
 Parana 2 (Reviewer Pre-release) 
 ===============================
 
-This software accompanies ISMB 2013 submission 217 "Predicting protein
-interactions via parsimonious ancestral network reconstruction" and is for
-reviewer purposes only.  It should not currently be redistributed.
+This software accompanies ISMB 2013 submission 217 
+
+> "Predicting protein interactions via parsimonious ancestral network reconstruction" 
+
+and is for **reviewer purposes only**.  It should not currently be redistributed.
+
+Data
+----
+
+A tarball containing both the bZIP and Herpes virus data, already in the correct
+format and able to be processed by the program, can be obtained [here](data.tgz).
 
 Installation
 ------------
@@ -24,14 +32,15 @@ a C++11 compatible (e.g. G++-4.7) compiler and the following external libraries:
 From the top level directory, one should execute the following commands 
 (> designates the prompt):
 
-
     > mkdir build
     > cd build
     > cmake ..
     > make
+    > mv bin ..
 
-
-Any errors are likely the result of a missing library.
+Any errors are likely the result of a missing library.  The last line moves
+the binary directory (containing the `parana2` executable) to the same relative
+path it's in in the binary release.
 
 Running the program
 -------------------
@@ -87,3 +96,51 @@ a cross-validation experiment (only the costs of the leaf hyperverties are affec
 experients), a cross validation flag (`-c [--cross]`) is available.  This command modifies the
 meaning of the `-o [--output]` option, so that argument passed to this option will now become
 a directory, under which the results of all separate cross validation experiments will be written.
+
+### Scripts
+
+The binary and source release contain a number of scripts to assist in reproducing the 
+results in the paper.  First you should download the binary release, or download and compile
+the source release.  Assume `PDir` is the top-level Parana2 directory (i.e. containing the
+`data`, `scripts`, etc. directories).  Next, grab the data tarball above, or execute the
+following commands in `PDir`:
+
+    > cd data
+    > wget http://www.cs.cmu.edu/~ckingsf/software/parana2/data.tgz
+    > tar xzvf data.tgz
+
+Now that the data is in the correct place, you can cd into the scripts directory.
+
+    > cd ../scripts
+
+From here, there are shell scripts to run the ancestral network reconstruction at different noise levels:
+
+    > sh ReconstructWithNoise.sh -d ../data -o ../output/noisetest
+
+the bZIP cross-validation experiments,
+
+    > sh BZIPCrossValidation.sh -d ../data -o ../output/bzipcross
+
+and the Herpes cross-validation experiments,
+
+    > sh HerpesCrossValidation.sh -d ../data -o ../output/herpescross
+
+In addition to numerous other scripts, the `scripts` directory also includes the scripts that
+can analyze these results determine the algorithm's performance.  In particular, there are 3
+scripts that are relevant:
+
+* AnalyzePredictions.py --- Analyzes the result of an network history inference.
+* ImputationCrossValidation.py --- Evaluates cross-validation experiments on the bZIP network
+* ComputeRanks.py --- Evaluates cross-validation experiments on the Herpes networks
+
+Each of these scripts is a python script and can be run with the -h option to document it's input.
+
+The Python scripts, themselves, rely on some libraries.  In particular, to run any of the scripts 
+you'll need [docopt](https://github.com/docopt/docopt).  Any of the scripts that analyze the
+phylogeny data will need [NetworkX](http://networkx.github.com/) to deal with the graphs and
+[ete2](http://ete.cgenomics.org/) to deal with the phyloXML phylogenies.  Additionally, for
+computation and plotting, they use [NumPy](www.numpy.org), [SciPy](www.scipy.org) and 
+[Matplotlib](www.matplotlib.org).  Finally, to compute the BEDROC scores (in the `AnalyzePredictions`
+script), we use the [Croc](http://swami.wustl.edu/CROC/) libraries.  Despite the long list,
+most of these libraries are fairly standard, and you should be able to install them all via
+`easy_install` or `pip`.
