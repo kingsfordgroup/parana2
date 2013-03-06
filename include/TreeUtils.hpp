@@ -18,7 +18,7 @@
 
 /** Bio++ **/
 #include <Bpp/Phyl/Io/Newick.h>
-#include <Bpp/Phyl/Io/NexusIOTree.h>
+#include <Bpp/Phyl/Io/NexusIoTree.h>
 #include <Bpp/Phyl/Tree.h>
 #include <Bpp/Exceptions.h>
 
