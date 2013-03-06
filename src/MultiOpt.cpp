@@ -2153,7 +2153,8 @@ bool viterbiCountNew(
     typedef std::vector<size_t> NumTailMap;
     ProbMap probMap(order.size(), 0.0);
     ProbMap outProbMap(order.size(), 0.0);
-    NumTailMap ntmap(order.size(),0);
+    
+    // NumTailMap ntmap(order.size(),0);
     // size_t invalidIdx = std::numeric_limits<size_t>::max();
     // typedef Google< size_t, double >::Map ProbMap;
     // ProbMap probMap;
@@ -2174,7 +2175,8 @@ bool viterbiCountNew(
 
     // The root gets a probability of 1
     probMap[rootInd] = 1.0;
-    ntmap[rootInd] = 1;
+    // Testing
+    // ntmap[rootInd] = 1;
 
     size_t ctr = 0;
     size_t tot = order.size();
@@ -2189,6 +2191,7 @@ bool viterbiCountNew(
     /******
     * Testing stuff
     */
+    /*
     boost::dynamic_bitset<> normed(order.size()); // all 0's by default
     boost::dynamic_bitset<> normedOut(order.size()); // all 0's by default
 
@@ -2224,6 +2227,8 @@ bool viterbiCountNew(
     };
 
     std::unordered_map< std::tuple<size_t, size_t>, ProbTransfer > ptsMap;
+    */
+
 
     /******
     * End testing stuff
@@ -2236,12 +2241,13 @@ bool viterbiCountNew(
         // The current vertex and it's probability
         auto key = H->vertex(*vit);
         auto parentProb = probMap[*vit];
-
-        // normalize the probabilities
         auto complementVert = flipBoth(key);
         auto complementInd = H->index(complementVert);
-        auto totalProb = probMap[*vit] + probMap[complementInd];
+
         /*
+        // normalize the probabilities
+        auto totalProb = probMap[*vit] + probMap[complementInd];
+        
         if ( normed[*vit] == 0 ) {
            
            // re-adjust the weights
@@ -2261,9 +2267,10 @@ bool viterbiCountNew(
                 std::exit(0);
             }
         }
-        */
+        
         parentProb = probMap[*vit];
-
+        */
+       
         // The total # of derivations of this vertex (over all considered cost classes)
         BigInt total(0);
         vector< MultiOpt::ScoreCount > cd;
@@ -2291,19 +2298,22 @@ bool viterbiCountNew(
         // Compute the weights for each of the score classes
         // considered at this node
         auto alphas = computeAlphasDouble( beta, cd, maxCostClass[*vit], total );
+        /** testing **/
+        /*
         double asum = 0.0; for( auto a : alphas ) { asum += a; }
         if ( maxDeriv > 0 and std::abs(asum - 1.0) >= 1e-3 ) { 
             std::cerr << "ALPHA sum  = " << asum << " != 1!\n"; std::exit(1); 
         }
-
-
         auto totalOutProb = 0.0;
+        */
+       
         // for each top-k score class
         for ( size_t i = 0; i < maxDeriv; ++i ) {
             // The i-th cost class for this node
             auto& cc = tkd[*vit][i];
             auto scoreClassWeight = std::log(alphas[i]);
-            double tprob = 0.0;
+            // testing
+            //double tprob = 0.0;
 
             // for all incoming edges contributing to this cost class
             for ( const auto & e : cc.usedEdges() ) {
@@ -2311,8 +2321,8 @@ bool viterbiCountNew(
                 // The conditional probability of taking edge 'e'
                 // given than we're deriving vertex *vit at score
                 // the given cost
-                auto condProb = std::log(cc.edgeProb(e));
-                tprob += std::exp(condProb);
+                auto condProb = cc.edgeProb(e);
+                //tprob += std::exp(condProb);
                 auto tail = H->getTail(e);
 
                 // What is the action along edge 'e' (i.e. how is
@@ -2323,13 +2333,18 @@ bool viterbiCountNew(
 
                 // Accumulate the probability due to the current
                 // cost class at outInd
-                double logPProb = std::log(parentProb);
-                //auto etprob = ( parentProb * (scoreClassWeight * condProb));
-                double etprob = std::exp(logPProb + scoreClassWeight + condProb);
-                totalOutProb += etprob;
+                auto etprob = ( parentProb * (scoreClassWeight * condProb));
+
+                // BEGIN Testing
+                //double logPProb = std::log(parentProb);
+                //double etprob = std::exp(logPProb + scoreClassWeight + condProb);
+                //totalOutProb += etprob;
+                // END Testing
+                
                 outProbMap[outInd] += etprob;
 
                 /** Testing **/
+                /*
                 auto ptsKey = (*vit < complementInd) ? 
                               make_tuple(*vit, complementInd) : make_tuple(complementInd, *vit);
 
@@ -2341,32 +2356,33 @@ bool viterbiCountNew(
                     pt = ptsMap.find(ptsKey);
                 }
                 pt->second.transferMass( get<0>(ptsKey), get<1>(ptsKey), etprob );
+                */
                 /** End Testing **/
 
-                auto tnprob = std::pow( etprob,  1.0 / tail.size() );
                 // For each tail vertex of this hyperarc,
                 // accumulate probability mass at this vertex
                 for ( const auto & tind : tail ) {
-                    if(normed[tind] == 1) { 
-                        std::cerr << "Node " << vstr(H->vertex(tind)) 
-                        << ", is already marked as normalized, and should not be touched"; 
-                        std::exit(0); 
-                    }
                     probMap[tind] += etprob;
-                    ntmap[tind] = tail.size();
                     //probMap[tind] += tnprob;
                 }
             } // end of loop over cost classes
+            /** Testing **/
+            /*
             if( not H->isLeaf(*vit) and std::abs(tprob - 1.0) >= 1e-5 ) { 
                 std::cerr << "Conditional prob = " << tprob << "; NOT 1"; 
                 
             }
+            */
+            /** End Testing**/
         } // end of loop over score classes
+        /** Testing **/
+        /*
         if( maxDeriv > 0 and (not H->isLeaf(*vit)) and std::abs(totalOutProb - parentProb) > 1e-5 ) { 
             std::cerr << "Total out prob (= " << totalOutProb << ") != "
                       << "Parent prob (= " << parentProb << ")\n"; 
         }
-
+       
+       
         normedOut[*vit] = 1;
         if ( (not H->isLeaf(*vit)) and normedOut[complementInd] == 1 ) {
             auto inSum = probMap[*vit] + probMap[complementInd];
@@ -2389,7 +2405,7 @@ bool viterbiCountNew(
                 std::cerr << "=================\n";
             }
         }
-
+        /** End Testing**/
     }
     cerr << "\n";
 
