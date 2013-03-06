@@ -13,7 +13,7 @@ Project( Parana2 )
 SET(CMAKE_VERBOSE_MAKEFILE ON)
 
 SET( CMAKE_BUILD_TYPE Release)
-SET( CMAKE_CXX_FLAGS "-O3 -DNDEBUG -arch x86_64 -std=c++11 -Wl,-no_pie -Wno-deprecated ${CMAKE_CXX_FLAGS}")
+SET( CMAKE_CXX_FLAGS "-g -O3 -BOOST_NO_PROPER_STL_DEALLOCATE -DBOOST_POOL_NO_MT -DHAVE_ANSI_TERM -DNDEBUG -arch x86_64 -std=c++11 -Wl,-no_pie -Wno-deprecated ${CMAKE_CXX_FLAGS}")
 
 # When Clang is ready
 #SET( CMAKE_CXX_FLAGS "-O3 -g -std=c++11 -stdlib=libstdc++ ${CMAKE_CXX_FLAGS}")

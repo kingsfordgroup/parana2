@@ -5,7 +5,7 @@ SET( PARANA_SRCS FlipKey.cpp TreeUtils.cpp PhyloXMLParser.cpp MultiOpt.cpp main.
 SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}" )
 
 INCLUDE_DIRECTORIES(
-  ${BOOST_INCLUDEDIR}
+  ${Boost_INCLUDE_DIR}
   /usr/local/include
   /opt/local/include
   /opt/local/include/gcc47/c++
@@ -36,7 +36,7 @@ FIND_LIBRARY( CLN_LIBRARY NAMES cln HINTS ${LINK_DIRECTORIES})
 
 SET( BPP_LIBRARIES ${BPP_CORE_LIBRARY} ${BPP_PHYL_LIBRARY} ${BPP_SEQ_LIBRARY} )
 SET( DEPENDENT_LIBS ${Boost_LIBRARIES} ${BPP_LIBRARIES} ${PUGIXML_LIBRARY} 
-                    ${GMP_LIBRARIES} ${MPFR_LIBRARY} ${CLN_LIBRARY} )
+                    ${GMP_LIBRARY} ${MPFR_LIBRARY} ${CLN_LIBRARY} )
 
 ADD_EXECUTABLE( parana2 ${PARANA_SRCS} )
 TARGET_LINK_LIBRARIES( parana2 m pthread ${DEPENDENT_LIBS} )

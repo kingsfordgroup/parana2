@@ -8,13 +8,14 @@
 #include <unordered_set>
 #include <tuple>
 #include <Bpp/Phyl/Tree.h>
-#include <boost/heap/fibonacci_heap.hpp>
+#include <boost/heap/skew_heap.hpp>
 #include <boost/heap/pairing_heap.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/topological_sort.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/functional/hash.hpp>
+#include <boost/pool/pool_alloc.hpp>
 #include <cln/rational.h>
 #include <cln/integer.h>
 #include <cln/float.h>
@@ -28,11 +29,12 @@
 #include <sstream>
 #include "mpreal.h"
 #include "TreeUtils.hpp"
-#include "CountedDerivation.hpp"
+//#include "CountedDerivation.hpp"
 #include "CostClass.hpp"
 #include "Derivation.hpp"
 #include "FHGraph.hpp"
 #include "GraphUtils.hpp"
+#include "ParanaCommon.hpp"
 
 /** Google's dense hash set and hash map **/
 #include <google/dense_hash_set>
@@ -80,6 +82,7 @@ namespace std {
 }
 
 class Model;
+class CountedDerivation;
 
 namespace MultiOpt {
 
@@ -88,6 +91,8 @@ namespace MultiOpt {
     using cln::cl_RA;
     using cln::cl_R;
     using cln::cl_float;
+    using boost::multiprecision::mpz_int;
+    using boost::multiprecision::mpq_rational;
     using google::dense_hash_set;
     using google::dense_hash_map;
     using google::sparse_hash_map;
@@ -110,6 +115,8 @@ namespace MultiOpt {
     using mpfr::mpreal;
     using Utils::Trees::TreePtrT;
 
+    // typedef mpz_int BigInt;
+    typedef cl_I BigInt;
 
     template< typename T1, typename T2=std::nullptr_t >
     struct Std{
@@ -123,8 +130,34 @@ namespace MultiOpt {
         typedef dense_hash_map<T1, T2, std::hash<T1>> Map;
     };
 
-    typedef tuple<double, vector<size_t> > dvsT;
-    typedef tuple<double, size_t, vector<size_t> > edvsT;
+    typedef tuple<double, vector<size_t, StackAllocator<size_t>> > dvsT;
+    typedef tuple<double, size_t, vector<size_t,StackAllocator<size_t>> > edvsT;
+
+    /**
+     * This struct holds the temporary info that's relevant when
+     * determining the set of k-best derivations of a vertex.
+     * 
+     */
+    struct EdgeDerivation {
+      double cost;     //!< The cost of this derivation
+      size_t edgeID;   //!< The edge this derivation uses
+      vector<size_t, StackAllocator<size_t>> backPointers; //!< The backpointers to the sub-derivations
+                                                           //!< of the tail nodes used by this derivation.
+                                                           
+      /**
+       * Construct an EdgeDerivation from the cost(c), edgeid(e) and backpointer array(bp).
+       * # NOTE: This constructor moves the backpointer array #
+       */
+      EdgeDerivation(double c, size_t e, vector<size_t, StackAllocator<size_t>>& bp) : 
+        cost(c), edgeID(e), backPointers(std::move(bp)) {}
+
+      void swap(EdgeDerivation& other) { 
+        std::swap(cost, other.cost);
+        std::swap(edgeID, other.edgeID);
+        backPointers.swap(other.backPointers);
+      }
+
+    };
 
     template <typename elemT>
     class QueueCmp {
@@ -155,9 +188,22 @@ namespace MultiOpt {
     typedef std::unordered_map< size_t, boost::heap::pairing_heap<CountedDerivation, boost::heap::compare<CountedDerivCmp<CountedDerivation>>> > CandStoreT;
     typedef std::vector< std::vector<CostClass<EdgeDerivInfoLazy> > > DerivStoreT;
 
-    typedef tuple<double, vector<size_t> > dvsT;
-    typedef unordered_map< size_t, unordered_map<size_t, Derivation>> slnDictT;
-    typedef Google< size_t, vector< tuple<double, cl_I> > >::Map countDictT;
+    /** previous hash based definitions **/
+    //typedef std::unordered_map<size_t, unordered_map<size_t, Derivation>> slnDictT;
+    //typedef Google< size_t, vector< tuple<double, BigInt> > >::Map countDictT;
+    //
+    struct ScoreCount {
+      double score;
+      BigInt count;
+      ScoreCount( double score_, BigInt& count_ ) : score{score_}, count{count_} {}
+      ScoreCount( double score_, const BigInt& count_ ) : score{score_}, count{count_} {}
+      ScoreCount( double score_, size_t count_ ) : score{score_}, count{count_} {}
+    };
+    /** current vector-based definitions **/
+    typedef std::vector< unordered_map<size_t, Derivation>> slnDictT;
+    //typedef std::vector< vector< tuple<double, BigInt> > > countDictT;
+    typedef std::vector< vector< ScoreCount > > countDictT;
+    
 
     typedef tuple<bool,bool> flipTupleT;
     typedef tuple<double, string> costRepT;
@@ -210,7 +256,7 @@ namespace MultiOpt {
      *  penalty factor.
      */
     template <typename T>
-    double existencePenalty( const TreeInfo& ti, const T& vert, const double& penalty, const double& travWeight );
+    double existencePenalty( const TreeInfo& ti, const T& vert, double penalty, double travWeight );
 
     unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
       const TreeInfo &ti,
@@ -233,20 +279,20 @@ namespace MultiOpt {
     void MLLeafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
 
     template <typename CostClassT>
-    tuple<double, cl_I> getCostCount( vector<vector<CostClassT>>& tkd,
-                                      const vector<size_t>& bp,
+    tuple<double, BigInt> getCostCount( vector<vector<CostClassT>>& tkd,
+                                      const vector<size_t, StackAllocator<size_t>>& bp,
                                       const size_t& eid,
                                       unique_ptr<ForwardHypergraph>& H );
 
     template <typename CostClassT >
     double getCost( const vector< vector<CostClassT> >& tkd,
-                    const vector<size_t>& bp,
+                    const vector<size_t, StackAllocator<size_t>>& bp,
                     const size_t& eid,
                     unique_ptr<ForwardHypergraph>& H );
 
     template <typename CostClassT >
-    cl_I getCount( const vector< vector<CostClassT> >& tkd,
-                   const vector<size_t>& bp,
+    BigInt getCount( const vector< vector<CostClassT> >& tkd,
+                   const vector<size_t, StackAllocator<size_t>>& bp,
                    const size_t& eid,
                    unique_ptr<ForwardHypergraph>& H );
 
@@ -263,7 +309,7 @@ namespace MultiOpt {
     // rank, #
     // (0, 3000)
     //
-    vector< tuple<double, cl_I> > countEdgeSolutions( const double& ecost,
+    vector< tuple<double, BigInt> > countEdgeSolutions( const double& ecost,
                                                       const vector<size_t>& tailNodes,
                                                       countDictT& countDict,
                                                       const size_t& k,
@@ -272,9 +318,9 @@ namespace MultiOpt {
                                                       TreePtrT& t
                                                        );
 
-    double estimateThermodynamicBeta( const vector<tuple<double, cl_I>>& slnVecIn, const double& emin );
+    double estimateThermodynamicBeta( const vector<ScoreCount>& slnVecIn, const double& emin );
 
-    vector<double> getAlphas( const vector< tuple<double, cl_I> >& slnVec, const cl_I& numPaths );
+    vector<double> getAlphas( const vector< tuple<double, BigInt> >& slnVec, const BigInt& numPaths );
 
     void insideOutside( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, countDictT& countDict, const string& outputName );
 
@@ -299,7 +345,7 @@ namespace MultiOpt {
                     const string &outputName, const vector<FlipKey> &outputKeys );
 
     template <typename CostClassT>
-    void viterbiCountNew( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,
+    bool viterbiCountNew( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,
                           slnDictT& slnDict, countDictT& countDict, const size_t& k,
                           const string& outputName, const vector<FlipKey>& outputKeys, const double& beta );
 

@@ -22,6 +22,8 @@
 #include <Bpp/Phyl/Tree.h>
 #include <Bpp/Exceptions.h>
 
+#include "ParanaCommon.hpp"
+
 namespace Utils {
     using std::get;
     using std::cerr;
@@ -41,12 +43,35 @@ namespace Utils {
 
     double round3( double num );
 
+    class ExistenceInterval {
+        public:
+            double birth;
+            double death;
+            ExistenceInterval( ) : birth(std::numeric_limits<double>::infinity()), 
+                                   death(-std::numeric_limits<double>::infinity()) {}
+
+            ExistenceInterval( double _birth, double _death ) :
+                               birth(_birth), death(_death) {}
+
+            double distance( const ExistenceInterval& other ) {
+                if ( birth <= other.death and other.birth <= death ) {
+                    return 0.0;
+                }
+                if ( birth > other.death ) {
+                    return birth - other.death;
+                }
+                if ( other.birth > death ) {
+                    return other.birth - death;
+                }
+            }
+    };
+
     class TreeInfo {
     public:
         typedef shared_ptr<bpp::TreeTemplate<bpp::Node>> TreePtrT;
         typedef unordered_map<int, unordered_set<string>> NodeMapT;
         typedef unordered_map<int, unordered_set<int>> NodeIndMapT;
-        typedef unordered_map<int, tuple<double,double>> NodeIntervalMapT;
+        typedef unordered_map<int, ExistenceInterval> NodeIntervalMapT;
         TreePtrT tree;
         NodeIndMapT subnodes;
         NodeIndMapT leaves;
@@ -70,21 +95,7 @@ namespace Utils {
         }
 
         double intervalDistance( int u, int v ) {
-            //return static_cast<const TreeInfo&>(*this).intervalDistance(u,v);
-            auto birthU = get<0>( extantInterval[u] );
-            auto deathU = get<1>( extantInterval[u] );
-            auto birthV = get<0>( extantInterval[v] );
-            auto deathV = get<1>( extantInterval[v] );
-            // If the ranges overlap, the distance is 0
-            if ( (birthU <= deathV) && (birthV <= deathU) ) { return 0.0; }
-            // otherwise
-            if ( birthU > deathV ) {
-                return birthU - deathV;
-            }
-
-            if ( birthV > deathU ) {
-                return birthV - deathU;
-            }
+            return extantInterval[u].distance(extantInterval[v]);
         }
 
         double intervalDistance( int u, int v ) const {
@@ -96,18 +107,18 @@ namespace Utils {
 
     template <typename pqT, typename pqCompT>
     bool appendNext( double score,
-                     const vector<size_t>& inds,
-                     const vector<size_t>& sizes,
+                     const vector<size_t, StackAllocator<size_t>>& inds,
+                     const vector<size_t, StackAllocator<size_t>>& sizes,
                      vector<pqT>& pq,
                      pqCompT& pqComp,
-                     std::function< double(const vector<size_t>&) >& computeScore );
+                     std::function< double(const vector<size_t, StackAllocator<size_t>>&) >& computeScore );
 
     template <typename pqT>
     bool appendNextWithEdge( const size_t& eid,
-                             const vector<size_t>& inds,
-                             const vector<size_t>& sizes,
+                             const vector<size_t, StackAllocator<size_t>>& inds,
+                             const vector<size_t, StackAllocator<size_t>>& sizes,
                              pqT& pq,
-                             std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore );
+                             std::function< double(const size_t& eid, const vector<size_t, StackAllocator<size_t>>&) >& computeScore );
     /*
     template <typename pqT>
     bool appendNextWithEdgeOrig( const size_t& eid,

@@ -31,23 +31,28 @@ private:
 	ProbabilityT _transitionProbability( const FlipKey& child, const FlipKey& parent, double dist ){
 		// ignore distance right now
 		// 0 + (0.92-0)/((1+0.25*e^{-5.0*{x-1.5}})^{1/1.})
-		//auto u = _prob[ FlipTupleT(parent.f(),parent.r()) ][ FlipTupleT(child.f(), child.r())  ];
-		bool keepingEdge = parent.f() and child.f();
-		bool loosingEdge = parent.f() and (!child.f());
-		bool gainingEdge = (!parent.f()) and child.f();
-		bool keepingNoEdge  = (!parent.f()) and (!child.f());
+		//auto r = _prob[ parent.state() ][ child.state() ];
+		//return r;
+		auto ps = parent.state();
+		auto cs = child.state();
+		
+		bool keepingEdge = (ps == FlipState::both) and (cs == FlipState::both);
+		bool loosingEdge = (ps == FlipState::both) and (cs == FlipState::none);
+		bool gainingEdge = (ps == FlipState::none) and (cs == FlipState::both);
+		bool keepingNoEdge  = (ps == FlipState::none) and (cs == FlipState::none);
+		auto u = _prob[ps][cs];
+
+		auto probLose = (u) / ((1.0 + 0.25 * std::exp( -5.0 * (dist - 1.5) ) ));
+		auto probGain = (u) / ((1.0+ std::exp(-3.0*(dist-2.5))));
+
 		if ( loosingEdge ) {
-			auto u = _prob[ FlipState::both ][ FlipState::none];
-			return (u) / ((1.0 + 0.25 * std::exp( -5.0 * (dist - 1.5) ) ));
+			return probLose;
 		} else if ( keepingEdge ) {
-			auto u = _prob[ FlipState::both ][ FlipState::none];
-			return 1.0 - ((u) / ((1.0 + 0.25 * std::exp( -5.0 * (dist - 1.5) ) )));
+			return 1.0 - probLose;
 		} else if ( gainingEdge ) {
-			auto u = _prob[ FlipState::none ][ FlipState::both];
-			return (u)/((1.0+ std::exp(-3.0*(dist-1.5))));
+			return probGain;
 		} else if ( keepingNoEdge ) {
-			auto u = _prob[ FlipState::none ][ FlipState::both];
-			return 1.0 - (u)/((1.0+ std::exp(-3.0*(dist-1.5))));
+			return 1.0 - probGain;
 		}
 	}
 	
@@ -108,9 +113,10 @@ public:
 
 	ProbabilityT transitionProbability( const FlipKey& child, const FlipKey& parent ) {
 		FlipKey::NodeIndexT parentU, parentV, childU, childV;
+
 		std::tie(parentU, parentV) = std::make_tuple(parent.u(), parent.v());
 		std::tie(childU, childV) = std::make_tuple(child.u(), child.v());
-	    
+
 		FlipKey::NodeIndexT pnode, cnode, onode;
 		if ( parentU == childU ) {
 			pnode = parentU; cnode = childV; onode = parentV;
@@ -123,12 +129,11 @@ public:
 		}
 
 
-		//auto dist = _t->getDistanceToFather(cnode);//1.0;
+		auto dist = _t->getDistanceToFather(cnode);//1.0;
 		//auto dist = bpp::TreeTools::getDistanceBetweenAnyTwoNodes( *_t.get(), onode, cnode);
 		//auto dist = _distMat->operator()(onode, cnode);
-		auto dist = 1.0;
-
-		//auto dist = _tinfo.intervalDistance(pnode, cnode);
+		//auto dist = 1.0;
+		//auto dist = _tinfo.intervalDistance(cnode, pnode);
 
 		return _transitionProbability( child, parent, dist );
 	}

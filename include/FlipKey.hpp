@@ -61,7 +61,7 @@ public:
     bool operator != (const FlipKey& other) const;
 
     int arity() const;
-
+    bool isSelfLoop() const;
     //const tuple<bool,bool> getDirTuple() const;
 
     int u() const;

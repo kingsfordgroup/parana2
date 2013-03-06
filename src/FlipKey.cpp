@@ -60,6 +60,10 @@ int FlipKey::arity() const {
     if ( get<0>(_nodes) == get<1>(_nodes) ) { return 1; } else { return 2; }
 }
 
+bool FlipKey::isSelfLoop() const {
+    return arity()==1;
+}
+
 //const tuple<bool,bool> FlipKey::getDirTuple() const { return make_tuple(_f, _r); }
 
 int FlipKey::u() const { return get<0>(_nodes);}

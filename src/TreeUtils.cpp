@@ -1,8 +1,11 @@
-#include "TreeUtils.hpp"
 #include "MultiOpt.hpp"
+#include "TreeUtils.hpp"
 #include <boost/heap/fibonacci_heap.hpp>
 #include <boost/heap/pairing_heap.hpp>
+#include <boost/heap/binomial_heap.hpp>
+#include <boost/heap/skew_heap.hpp>
 #include <Bpp/Phyl/Io/Nhx.h>
+#include "ParanaCommon.hpp"
 using boost::heap::fibonacci_heap;
 using boost::heap::pairing_heap;
 
@@ -38,15 +41,17 @@ namespace Utils {
 
     template <typename pqT, typename pqCompT>
     bool appendNext( double score,
-                     const vector<size_t>& inds,
-                     const vector<size_t>& sizes,
+                     const vector<size_t, StackAllocator<size_t>>& inds,
+                     const vector<size_t, StackAllocator<size_t>>& sizes,
                      vector<pqT>& pq,
                      pqCompT& pqComp,
-                     std::function< double(const vector<size_t>&) >& computeScore ) {
+                     std::function< double(const vector<size_t, StackAllocator<size_t>>&) >& computeScore ) {
 
         size_t i = 0;
         while ( i < inds.size() ) {
-            vector<size_t> newInds(inds);
+            vector<size_t, StackAllocator<size_t>> newInds(inds);
+            //newInds.reserve(inds.size());
+            //std::copy(inds.begin(), inds.end(), newInds.begin());
             newInds[i]++;
             if ( newInds[i] < sizes[i] ) {
                 pq.push_back( make_tuple( computeScore(newInds), newInds ) );
@@ -61,19 +66,18 @@ namespace Utils {
 
     template <typename pqT>//, typename pqCompT>
     bool appendNextWithEdge( const size_t& eid,
-                             const vector<size_t>& inds,
-                             const vector<size_t>& sizes,
+                             const vector<size_t, StackAllocator<size_t>>& inds,
+                             const vector<size_t, StackAllocator<size_t>>& sizes,
                              pqT& pq,
-                             //vector<pqT>& pq,
-                             //pqCompT& pqComp,
-                             std::function< double(const size_t& eid, const vector<size_t>&) >& computeScore ) {
-
+                             std::function< double(const size_t& eid, const vector<size_t,StackAllocator<size_t>>&) >& computeScore ) {
         size_t i = 0;
-        while ( i < inds.size() ) {
-            vector<size_t> newInds(inds);
+        size_t ninds = inds.size();
+        while ( i < ninds ) {
+            vector<size_t, StackAllocator<size_t>> newInds(inds);
             newInds[i]++;
             if ( newInds[i] < sizes[i] ) {
-                pq.push( make_tuple( computeScore(eid, newInds), eid, newInds ) );
+                // Custom fix -- check to see if Boost folks fix emplace operation
+                pq.emplace( computeScore(eid, newInds), eid, newInds );
             }
             if (inds[i] != 0) { return true; }
             i += 1;
@@ -126,6 +130,7 @@ namespace Utils {
 */
 
     typedef tuple<double, vector<size_t> > dvsT;
+
     class QueueCmp {
     public:
         bool cmpArrays( const vector<size_t>& a, const vector<size_t>& b) {
@@ -243,16 +248,23 @@ namespace Utils {
         void prepareTree( TreePtrT& t, TreeInfo& ti, int nid ) {
             // if the current node is not the root
             if ( nid != t->getRootId() ) {
+                
                 auto fid = t->getFatherId(nid);
-                auto parentDeathT = get<1>(ti.extantInterval[fid]);
-                assert ( ti.extantInterval.find(fid) != ti.extantInterval.end() );
+                
+                if ( ti.extantInterval.find(fid) == ti.extantInterval.end() ) {
+                    std::cerr << "FATAL: Must know parent interval before computing "
+                              << "child interval\n";
+                    std::abort();
+                }
+
+                auto parentDeathT = ti.extantInterval[fid].death;
                 double fdist = 0.0;
                 if ( t->isLeaf(nid) ) {
                     fdist = std::numeric_limits<double>::infinity();
                 } else if ( t->hasDistanceToFather(nid) ) {
                     fdist = t->getDistanceToFather(nid);
                 }
-                ti.extantInterval[ nid ] = make_tuple( parentDeathT, parentDeathT + fdist );
+                ti.extantInterval[ nid ] = ExistenceInterval( parentDeathT, parentDeathT + fdist );
             }
 
             if (t->isLeaf(nid)) {
@@ -294,15 +306,20 @@ namespace Utils {
 
 }
 
-template bool Utils::appendNext<MultiOpt::dvsT, MultiOpt::QueueCmp<MultiOpt::dvsT>>( double, const vector<size_t>&, const vector<size_t>& , vector<MultiOpt::dvsT>& , MultiOpt::QueueCmp<MultiOpt::dvsT>& , std::function< double(const vector<size_t>&) >& );
+template bool Utils::appendNext<MultiOpt::dvsT, MultiOpt::QueueCmp<MultiOpt::dvsT>>(double, 
+    const vector<size_t, StackAllocator<size_t>>&, 
+    const vector<size_t, StackAllocator<size_t>>& , 
+    vector<MultiOpt::dvsT>& ,
+    MultiOpt::QueueCmp<MultiOpt::dvsT>& , 
+    std::function< double(const vector<size_t, StackAllocator<size_t>>&) >& );
 
 
-typedef boost::heap::pairing_heap<MultiOpt::edvsT, boost::heap::compare<MultiOpt::QueueCmp<MultiOpt::edvsT>>> heapT;
+typedef boost::heap::skew_heap<MultiOpt::EdgeDerivation, boost::heap::compare<MultiOpt::CountedDerivCmp<MultiOpt::EdgeDerivation>>> heapT;
 template bool Utils::appendNextWithEdge<heapT>( const size_t&,
-                                                const vector<size_t>&,
-                                                const vector<size_t>& ,
+                                                const vector<size_t, StackAllocator<size_t>>&,
+                                                const vector<size_t, StackAllocator<size_t>>& ,
                                                 heapT&,
-                                                std::function< double(const size_t&, const vector<size_t>&) >&);
+                                                std::function< double(const size_t&, const vector<size_t, StackAllocator<size_t>>&) >&);
 /*
 template bool Utils::appendNextWithEdgeOrig<heapT>( const size_t&,
                                                 const vector<size_t>&,

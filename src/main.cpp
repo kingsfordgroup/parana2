@@ -157,6 +157,7 @@ int main( int argc, char **argv ) {
     // Those options only relevant to the parsimony method
     po::options_description parsimony("Parsimony Specific Options");
     parsimony.add_options()
+    ("del", po::value< double >()->default_value(1.0), "deletion cost")
     ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
     ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
     ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
@@ -208,8 +209,8 @@ int main( int argc, char **argv ) {
         bool directed = !undirected;
 
         double penalty = ap["timePenalty"].as<double>();
-        double deletionCost = 1.0;
-        double creationCost = ap["ratio"].as<double>();
+        double deletionCost = ap["del"].as<double>();
+        double creationCost = ap["ratio"].as<double>() * deletionCost;
         size_t k = ap["numOpt"].as<size_t>();
 
         std::cerr << "[creation] : [deletion] ratio is [" << creationCost << "] : [" << deletionCost << "]\n";
@@ -296,7 +297,7 @@ int main( int argc, char **argv ) {
                 keyList.push_back( FlipKey(r1, r2, true, true) );
             }
 
-            tinfo.extantInterval[ rId ] = make_tuple( -std::numeric_limits<double>::infinity(), 0.0 );
+            tinfo.extantInterval[ rId ] = Utils::ExistenceInterval( -std::numeric_limits<double>::infinity(), 0.0 );
             Utils::Trees::prepareTree( tree, tinfo, rId );
             /*
             auto nodes = vector<int>(tree->getNodesId());
@@ -402,6 +403,7 @@ int main( int argc, char **argv ) {
                 //MultiOpt::topologicalOrderQueue( H, rootInd, order );
 
                 MultiOpt::slnDictT slnDict;
+                slnDict.resize(order.size());
                 if ( undirected ) {
                     MultiOpt::MLLeafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
                 } else {
@@ -424,6 +426,8 @@ int main( int argc, char **argv ) {
 
                 auto performReconstruction = [&]( const std::string& outputFileName ) -> bool {
                 MultiOpt::slnDictT slnDict;
+                slnDict.resize(order.size());
+
                 //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
                 if ( undirected ) {
                     MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
@@ -436,7 +440,9 @@ int main( int argc, char **argv ) {
 
                 // Count the # of opt slns.
                 MultiOpt::countDictT countDict;
-                countDict.set_empty_key(-1);
+                //countDict.set_empty_key(-1);
+                countDict.resize(order.size());
+                
                 auto beta =  ap["beta"].as<double>();
 
                 if (ap.isPresent("lazy")) {
@@ -486,6 +492,7 @@ int main( int argc, char **argv ) {
                         LOG_INFO(log) << "New algo\n";
                         // eager
                         MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
+                        std::cerr << "DONE" << std::endl;
                         LOG_INFO(log) << "DONE\n";
                     }
                 }
@@ -576,6 +583,8 @@ int main( int argc, char **argv ) {
 
                 case false:
                   performReconstruction( outputName );
+                  std::cerr << "HERE\n";
+                  std::exit(1);
                   break;
             }
         }

@@ -4,6 +4,8 @@
 #include <unordered_map>
 #include <vector>
 #include <limits>
+#include <boost/multiprecision/gmp.hpp>
+#include <boost/pool/pool_alloc.hpp>
 
 #include <cln/rational.h>
 #include <cln/integer.h>
@@ -12,10 +14,13 @@
 
 #include "CountedDerivation.hpp"
 #include "FHGraph.hpp"
+#include "ParanaCommon.hpp"
 
 using std::unordered_map;
 using std::vector;
 using cln::cl_I;
+using boost::multiprecision::mpz_int;
+using boost::multiprecision::mpq_rational;
 
 /** Holds the relevant information, for the eager algorithm, about
  * derivations using a particular edge.
@@ -28,71 +33,83 @@ using cln::cl_I;
 class EdgeDerivInfoEager{
 
     // typedefs
+    // typedef mpz_int BigInt;
+    typedef cl_I BigInt;
+
+
 public:
-    typedef std::vector<size_t> FrontierT;
+    typedef std::vector<size_t, CustomAllocator<size_t>> FrontierT;
 public:
-    EdgeDerivInfoEager( ) : _count(cl_I(0)), _frontier( vector<size_t>(0,0) ) {}
-    EdgeDerivInfoEager( const cl_I& count,
-                   const std::vector<size_t>& frontier ): _count(count), _frontier(frontier) {}
+    EdgeDerivInfoEager( ) : _count(BigInt(0)), _frontier( vector<size_t, CustomAllocator<size_t>>(0,0) ) {}
+    EdgeDerivInfoEager( const BigInt& count,
+                        const std::vector<size_t, CustomAllocator<size_t>>& frontier ): _count(count),
+                        _frontier(std::move(frontier)) {}
 
     void updateWithDeriv( const CountedDerivation& d ) {
         updateCount( d.count );
         updateFrontier( d.bp );
     }
 
-    void updateFrontier( const std::vector<size_t>& bp ) {
+    void updateFrontier( const std::vector<size_t, CustomAllocator<size_t>>& bp ) {
         assert(bp.size() == _frontier.size());
         for( size_t ti = 0; ti < _frontier.size(); ++ti ) {
             _frontier[ti] = std::max(bp[ti], _frontier[ti]);
         }
     }
 
-    void updateCount( const cl_I& nc ) { _count += nc; }
-    const cl_I& count() { return _count; }
-    const std::vector<size_t>& frontier() { return _frontier; }
+    void updateCount( const BigInt& nc ) { _count += nc; }
+    const BigInt& count() { return _count; }
+    const std::vector<size_t, CustomAllocator<size_t>>& frontier() { return _frontier; }
     void freeDerivations() { _frontier.clear(); }
 
 private:
-    std::vector<size_t> _frontier;
-    cl_I _count;
+    FrontierT _frontier;
+    BigInt _count;
 };
 
 // lazy
 
 class EdgeDerivInfoLazy{
     // typedefs
+
 public:
-    typedef std::vector< std::vector<size_t> > FrontierT;
+    //typedef mpz_int BigInt;
+    typedef cl_I BigInt;
+    typedef std::vector< std::vector<size_t, CustomAllocator<size_t>> > FrontierT;
 public:
-    EdgeDerivInfoLazy( ) : _count(cl_I(0)), _frontier( vector<vector<size_t>>(0,vector<size_t>()) ) {}
-    EdgeDerivInfoLazy( const cl_I& count,
-                   const std::vector<size_t>& ibp ): _count(count), _frontier({ibp}) {}
+    EdgeDerivInfoLazy( ) : _count(BigInt(0)), _frontier( vector<vector<size_t, CustomAllocator<size_t>>>(0,vector<size_t, CustomAllocator<size_t>>()) ) {}
+    EdgeDerivInfoLazy( const BigInt& count,
+                   const std::vector<size_t, CustomAllocator<size_t>>& ibp ): _count(count), _frontier({ibp}) {}
 
     void updateWithDeriv( const CountedDerivation& d ) {
         updateCount( d.count );
         updateFrontier( d.bp );
     }
 
-    void updateFrontier( const std::vector<size_t>& bp ) {
+    void updateFrontier( const std::vector<size_t, CustomAllocator<size_t>>& bp ) {
         _frontier.push_back(bp);
     }
 
-    void updateCount( const cl_I& nc ) { _count += nc; }
+    void updateCount( const BigInt& nc ) { _count += nc; }
 
     void freeDerivations() { _frontier.clear(); }
 
-    const cl_I& count() { return _count; }
-    const std::vector<std::vector<size_t>>& frontier() { return _frontier; }
+    const BigInt& count() { return _count; }
+    const std::vector<std::vector<size_t, CustomAllocator<size_t>>>& frontier() { return _frontier; }
 
 private:
-    std::vector<std::vector<size_t>> _frontier;
-    cl_I _count;
+    FrontierT _frontier;
+    BigInt _count;
 };
 
 template <typename EdgeDerivInfoT>
 class CostClass {
 
     typedef size_t edgeID_t;
+    //typedef mpz_int BigInt;
+    typedef cl_I BigInt;
+
+
 public:
     CostClass(): _usedEdges(unordered_map<edgeID_t, EdgeDerivInfoT>()), _cost(-std::numeric_limits<double>::max()) {}
     CostClass(double cost): _usedEdges(unordered_map<edgeID_t, EdgeDerivInfoT>()), _cost(cost) {}
@@ -116,13 +133,7 @@ public:
         if ( hasEdge(e) ) {
             // For each tail node, possibly update the largest used
             // cost class
-
-            // lazy
             _usedEdges[e].updateWithDeriv( deriv );
-
-            // eager
-            //_usedEdges[e].updateFrontier( deriv.bp );
-            //_usedEdges[e].updateCount( numSln );
         } else {
             _usedEdges[e] = EdgeDerivInfoT( numSln, deriv.bp  );
         }
@@ -156,22 +167,27 @@ public:
     /** Return the probability of edge eid under this score class
      */
     double edgeProb( const edgeID_t& eid ) {
-        cl_I edgeCount(0);
+        BigInt edgeCount(0);
         if( hasEdge(eid) ) {
           edgeCount = _usedEdges[eid].count();
         }
         return double_approx(edgeCount / _total);
+        /*
+        rationalCache_ = edgeCount;
+        rationalCache_ /= _total;
+        return rationalCache_.convert_to<double>();
+        */
     }
 
    /** Return the total number of derivations of this cost class
    */
-   cl_I total() { return _total; }
+   BigInt& total() { return _total; }
 
    double cost() { return _cost; }
 
    /** Return the total number of derivations of this cost class
     */
-   cl_I total() const { return _total; }
+   const BigInt& total() const { return _total; }
 
    double cost() const { return _cost; }
 
@@ -188,7 +204,8 @@ private:
      */
     unordered_map<edgeID_t, EdgeDerivInfoT> _usedEdges;
     double _cost;
-    cl_I _total;
+    BigInt _total;
+    //mpq_rational rationalCache_;
 };
 
 #endif // COSTCLASS_HPP
