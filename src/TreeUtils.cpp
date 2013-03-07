@@ -210,7 +210,7 @@ namespace Utils {
 
         string getSpeciesName(const TreePtrT& t, int nid) {
             return dynamic_cast<bpp::BppString*>( t->getNodeProperty(nid,"S") )->toSTL();
-        }
+        } 
 
         bool isDescendantSpecies(const TreeInfo& ti, int u, int v)  {
 
@@ -242,7 +242,7 @@ namespace Utils {
         }
 
         bool sameSpecies(const TreePtrT& t, int u, int v) {
-            return getSpeciesName(t, u) == getSpeciesName(t, v);
+            return  getSpeciesName(t, u) == getSpeciesName(t, v);
         }
 
         void prepareTree( TreePtrT& t, TreeInfo& ti, int nid ) {

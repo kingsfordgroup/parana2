@@ -336,18 +336,18 @@ namespace MultiOpt {
                        countDictT& countDict,
                        const size_t& k,
                        const string& outputName,
-                       const vector<FlipKey>& outputKeys,
+                       const vector<size_t>& outputKeys,
                        const double& beta);
 
     template <typename CostClassT>
     void probabilistic( unique_ptr<ForwardHypergraph> &H, Model& model, TreePtrT &t,
                     const vector<size_t> &order, slnDictT &slnDict, 
-                    const string &outputName, const vector<FlipKey> &outputKeys );
+                    const string &outputName, const vector<size_t> &outputKeys );
 
     template <typename CostClassT>
     bool viterbiCountNew( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order,
                           slnDictT& slnDict, countDictT& countDict, const size_t& k,
-                          const string& outputName, const vector<FlipKey>& outputKeys, const double& beta );
+                          const string& outputName, const vector<size_t>& outputKeys, const double& beta );
 
     void viterbi( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict );
 
@@ -381,7 +381,7 @@ namespace MultiOpt {
                            vector<size_t>& order,
                            DerivStoreT& derivs,
                            const string& outputName,
-                           const vector<FlipKey>& outputKeys,
+                           const vector<size_t>& outputKeys,
                            const double& beta
                            );
 

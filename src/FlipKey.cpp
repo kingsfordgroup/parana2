@@ -79,8 +79,14 @@ bool FlipKey::connectV() const {
     return (_connect == MustConnect::right or _connect == MustConnect::both); }
 
 std::size_t FlipKey::hashCode() const {
-    std::hash<int> h;
-    return (h( get<0>(_nodes) ) + h( get<1>(_nodes) )) + _state  + static_cast<uint32_t>(_connect);
+    size_t seed = 0;
+    boost::hash_combine(seed, get<0>(_nodes));
+    boost::hash_combine(seed, get<1>(_nodes));
+    boost::hash_combine(seed, static_cast<int>(_state));
+    boost::hash_combine(seed, static_cast<int>(_connect));
+    return seed;
+    //std::hash_combine<int> h;
+    //return (h( get<0>(_nodes) ) + h( get<1>(_nodes) )) + static_cst<int>(_state)  + static_cast<int>(_connect);
 }
 
 FlipKey flipBoth( const FlipKey& k ) { return FlipKey( k.u(), k.v(), fsBoth[k.state()], k.mustConnect() ); }

@@ -21,6 +21,7 @@
 
 /** Local Includes */
 #include <arg_parser.hpp>
+#include "CrossValidationParser.hpp"
 
 /** Bio++ **/
 #include <Bpp/Phyl/Io/Newick.h>
@@ -147,7 +148,7 @@ int main( int argc, char **argv ) {
     // The general options are relevant to either method
     po::options_description general("Genearal Options");
     general.add_options()
-    ("cross,c", po::value< bool >()->zero_tokens(), "perform a cross-validation on the extant edges")
+    ("cross,c", po::value< string >(), "perform a cross-validation on the extant edges")
     ("target,t", po::value< string >(), "extant graph file")
     ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
     ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
@@ -288,7 +289,8 @@ int main( int argc, char **argv ) {
             TreeInfo tinfo("TreeInfo", tree);
             auto rId = tree->getRootId();
 
-            vector<FlipKey> keyList;
+            vector<size_t> keyList;
+            /*
             if ( treeNames.size() > 1 ) {
 
                 auto r1 = tree->getSonsId(rId)[0];
@@ -296,9 +298,24 @@ int main( int argc, char **argv ) {
 
                 keyList.push_back( FlipKey(r1, r2, true, true) );
             }
-
+            */
+           
             tinfo.extantInterval[ rId ] = Utils::ExistenceInterval( -std::numeric_limits<double>::infinity(), 0.0 );
             Utils::Trees::prepareTree( tree, tinfo, rId );
+
+            auto vstr = [&]( const FlipKey & vert ) -> string {
+                auto uname = tree->getNodeName(vert.u());
+                auto vname = tree->getNodeName(vert.v());
+                if (uname > vname) {
+                    auto tmp = vname;
+                    vname = uname;
+                    uname = tmp;
+                }
+                auto fstr = vert.f() ? "true" : "false";
+                auto rstr = vert.r() ? "true" : "false";
+                return uname + "\t" + vname + "\t" + fstr + "\t" + rstr;
+            };
+
             /*
             auto nodes = vector<int>(tree->getNodesId());
             std::sort( nodes.begin(), nodes.end(),
@@ -328,10 +345,10 @@ int main( int argc, char **argv ) {
             }
             */
 
-            unordered_map<string, int> leafIDMap;
-            for ( auto nid : tree->getLeavesId() ) {
-                leafIDMap[ Utils::Trees::getName(tree, nid) ] = nid;
-            }
+            // unordered_map<string,int> leafIDMap;
+            // for ( auto nid : tree->getLeavesId() ) {
+            //     leafIDMap[ Utils::Trees::getName(tree, nid) ] = nid;
+            // }
 
             // Check if the graph is an adjacency list (this means it's unweighted)
             auto isAdjList = [&]() {
@@ -345,41 +362,57 @@ int main( int argc, char **argv ) {
                 G = undirectedGraphT();
                 auto &UG = get<undirectedGraphT>(G);
 
-                //Add all leaf nodes to the graph
-                for ( auto nameId : leafIDMap ) {
-                    if ( nameId.first.find("LOST") == nameId.first.npos  ) {
-                        auto u = add_vertex(UG);
-                        UG[u].name = nameId.first;
-                        UG[u].idx = nameId.second;
-                    }
+                if ( isAdjList ) { // The target graph is unweighted (binary)
+                    GraphUtils::readFromAdjacencyList( graphName, UG );
+                } else { // The target graph has edge weights
+                    GraphUtils::readFromMultilineAdjacencyList(graphName, UG );
                 }
 
-                if ( isAdjList ) { // The target graph is unweighted (binary)
-                    GraphUtils::readFromAdjacencyList( graphName, leafIDMap, UG );
-                } else { // The target graph has edge weights
-                    GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, UG );
+                // Augment the graph nodes with the correpsonding
+                // node ids from the phylogeny
+                auto vp = boost::vertices(UG);
+                unordered_set<int> leavesCovered;
+                for ( auto it = vp.first; it != vp.second; ++it ) {
+                    auto lid = tree->getLeafId( UG[*it].name );
+                    UG[*it].idx = lid;
+                    leavesCovered.insert(lid);
+                }
+
+                if ( leavesCovered.size() != boost::num_vertices(UG) ) {
+                    std::cerr << "I added " << leavesCovered.size() << " IDs to the graph, but "
+                              << "there were " << boost::num_vertices(UG) << " graph nodes.\n";
+                    std::cerr << "These numbers should be the same; aborting\n";
+                    std::abort();
                 }
 
             } else { // The target network is directed
                 G = directedGraphT();
                 auto &DG = get<directedGraphT>(G);
 
-                // Add all leaf nodes to the graph
-                for ( auto nameId : leafIDMap ) {
-                    if ( nameId.first.find("LOST") == nameId.first.npos  ) {
-                        auto u = add_vertex(DG);
-                        DG[u].name = nameId.first;
-                        DG[u].idx = nameId.second;
-                    }
-                }
-
                 if ( isAdjList ) { // The target graph is unweighted (binary)
-                    GraphUtils::readFromAdjacencyList( graphName, leafIDMap, DG );
+                    GraphUtils::readFromAdjacencyList( graphName, DG );
                 } else { // The target graph has edge weights
-                    GraphUtils::readFromMultilineAdjacencyList(graphName, leafIDMap, DG );
+                    GraphUtils::readFromMultilineAdjacencyList(graphName, DG );
                 }
 
+                // Augment the graph nodes with the correpsonding
+                // node ids from the phylogeny
+                auto vp = boost::vertices(DG);
+                unordered_set<int> leavesCovered;
+                for ( auto it = vp.first; it != vp.second; ++it ) {
+                    auto lid = tree->getLeafId( DG[*it].name );
+                    DG[*it].idx = lid;
+                    leavesCovered.insert(lid);
+                }
+                if ( leavesCovered.size() != boost::num_vertices(DG) ) {
+                    std::cerr << "I added " << leavesCovered.size() << " IDs to the graph, but "
+                              << "there were " << boost::num_vertices(DG) << " graph nodes.\n";
+                    std::cerr << "These numbers should be the same; aborting\n";
+                    std::abort();
+                }
             }
+
+
 
             // Using probabilistic (Maximum Likelihood) algo.
             if ( method == "prob" ) {
@@ -424,84 +457,71 @@ int main( int argc, char **argv ) {
                 vector<size_t> order; order.reserve( H->order() );
                 MultiOpt::topologicalOrder( H, tree, tinfo, order );
 
-                auto performReconstruction = [&]( const std::string& outputFileName ) -> bool {
-                MultiOpt::slnDictT slnDict;
-                slnDict.resize(order.size());
 
-                //slnDict.set_empty_key( std::numeric_limits<size_t>::max() );
-                if ( undirected ) {
-                    MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
-                } else {
-                    MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
-                }
+                auto performReconstruction = [&]( const std::string& outputFileName, MultiOpt::slnDictT& slnDict ) -> bool {
+                    //auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
+                    //auto rootInd = H->index(rootKey);
 
-                //auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
-                //auto rootInd = H->index(rootKey);
-
-                // Count the # of opt slns.
-                MultiOpt::countDictT countDict;
-                //countDict.set_empty_key(-1);
-                countDict.resize(order.size());
+                    // Count the # of opt slns.
+                    MultiOpt::countDictT countDict;
+                    //countDict.set_empty_key(-1);
+                    countDict.resize(order.size());
                 
-                auto beta =  ap["beta"].as<double>();
+                    auto beta =  ap["beta"].as<double>();
 
-                if (ap.isPresent("lazy")) {
-                    // lazy
-                    auto derivs = MultiOpt::initKBest( H, order, slnDict );
-                    std::vector<size_t> edges = MultiOpt::viterbiPass(H, derivs, order);
+                    if (ap.isPresent("lazy")) {
+                        // lazy
+                        auto derivs = MultiOpt::initKBest( H, order, slnDict );
+                        std::vector<size_t> edges = MultiOpt::viterbiPass(H, derivs, order);
 
-                    auto vstr = [&]( const FlipKey & vert ) -> string {
-                        auto uname = tree->getNodeName(vert.u());
-                        auto vname = tree->getNodeName(vert.v());
-                        if (uname > vname) {
-                            auto tmp = vname;
-                            vname = uname;
-                            uname = tmp;
-                        }
-                        auto fstr = vert.f() ? "true" : "false";
-                        auto rstr = vert.r() ? "true" : "false";
-                        return uname + "\t" + vname + "\t" + fstr + "\t" + rstr;
-                    };
-
-                    vector<size_t> q;
-                    q.push_back(rootInd);
-                    while ( q.size() > 0 ) {
-                        auto vit = q.back();
-                        auto eid = edges[vit];
-                        auto e = H->edge(eid);
-                        auto isInternal = H->incident(vit).size() > 0;
-                        q.pop_back();
-                        cerr << "satisfying " << vstr(H->vertex(vit)) << " using [ ";
-                        for ( auto tid : e.tail() ) {
-                            cerr << vstr( H->vertex(tid) ) << ", ";
-                            if (isInternal) {
-                                q.push_back(tid);
+                        vector<size_t> q;
+                        q.push_back(rootInd);
+                        while ( q.size() > 0 ) {
+                            auto vit = q.back();
+                            auto eid = edges[vit];
+                            auto e = H->edge(eid);
+                            auto isInternal = H->incident(vit).size() > 0;
+                            q.pop_back();
+                            cerr << "satisfying " << vstr(H->vertex(vit)) << " using [ ";
+                            for ( auto tid : e.tail() ) {
+                                cerr << vstr( H->vertex(tid) ) << ", ";
+                                if (isInternal) {
+                                    q.push_back(tid);
+                                }
                             }
+                            cerr << "]\n";
                         }
-                        cerr << "]\n";
-                    }
 
-                    exit(0);
-                    MultiOpt::lazyKthBest( H, rootInd, k, k, derivs );
-                    MultiOpt::computePosteriors(H, tree, order, derivs, outputFileName, keyList, beta);
-                } else {
-                    if ( ap.isPresent("old") ) {
-                        LOG_INFO(log) << "Old algo\n";
-                        MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
+                        exit(0);
+                        MultiOpt::lazyKthBest( H, rootInd, k, k, derivs );
+                        MultiOpt::computePosteriors(H, tree, order, derivs, outputFileName, keyList, beta);
                     } else {
-                        LOG_INFO(log) << "New algo\n";
-                        // eager
-                        MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
-                        std::cerr << "DONE" << std::endl;
-                        LOG_INFO(log) << "DONE\n";
+                        if ( ap.isPresent("old") ) {
+                            LOG_INFO(log) << "Old algo\n";
+                            MultiOpt::viterbiCount(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
+                        } else {
+                            LOG_INFO(log) << "New algo\n";
+                            std::cerr << "KEY LIST SIZE IS " << keyList.size() << "\n";
+                            // eager
+                            MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, countDict, k, outputFileName, keyList, beta);
+                            std::cerr << "DONE" << std::endl;
+                            LOG_INFO(log) << "DONE\n";
+                        }
                     }
-                }
-            }; // end of reconstruction function
+                }; // end of reconstruction function
 
             auto doCrossValidation = ap.isPresent("cross");
+            string crossValidationFile;
+            if ( doCrossValidation ) {
+                crossValidationFile = ap["cross"].as<string>();
+            }
             path outputPath(outputName);
             switch (doCrossValidation) {
                 case true:
+                  {
+                  CrossValidationTestParser parser( crossValidationFile );
+                  auto crossValTests = parser.parse();
+
                   // Check if the cross validation directory exists
                   if ( exists(outputPath) ) {
                     if ( !is_directory(outputPath) ) { 
@@ -520,6 +540,8 @@ int main( int argc, char **argv ) {
                     typedef typename boost::graph_traits< undirectedGraphT >::edge_descriptor EdgeT;
                     typedef typename boost::graph_traits< undirectedGraphT >::vertex_descriptor VertexT;
                     typedef typename boost::graph_traits< undirectedGraphT >::edge_iterator EdgeItT;
+                    
+
                     EdgeItT eit, eend;
                     std::tie(eit, eend) = boost::edges( Graph );
                     std::vector< std::tuple<VertexT,VertexT> > edges;
@@ -528,26 +550,153 @@ int main( int argc, char **argv ) {
                         edges.push_back(make_tuple( boost::source(*eit,Graph), boost::target(*eit, Graph) ));
                     }
 
-                    VertexT u,v;
-                    for( auto& uv : edges ) {
-                        std::tie(u,v) = uv;
-                        EdgeT edge; bool exists;
-                        std::tie(edge,exists) = boost::edge(u,v,Graph);
-                        auto weight = Graph[edge].weight;
-                        // Remove the edge from the graph
-                        boost::remove_edge(u,v,Graph);
-
-                        // Perform the reconstruction
-                        auto nameU = Graph[u].name; auto nameV = Graph[v].name;
-                        auto reconFileName = boost::str( boost::format("%1%/removed@%2%#%3%@txt") % outputName % nameU % nameV );
-                        performReconstruction( reconFileName );
-
-                        // Add the edge back to the graph
-                        std::tie(edge, exists) = boost::add_edge(u,v,Graph);
-                        Graph[edge].weight = weight;
+                    auto isLostNode = [&]( const std::string& n ) -> bool { return n.find("LOST") != n.npos; };
+                    //
+                    //  We're only interested in potential "extant" edges, so only output those
+                    //
+                    unordered_set<size_t> lostNodes;
+                    unordered_set<string> vertNames;
+                    auto vp = boost::vertices(Graph);
+                    for ( auto it = vp.first; it != vp.second; ++it ) {
+                        if (isLostNode( Graph[*it].name )) { lostNodes.insert(Graph[*it].idx); }
+                        vertNames.insert(Graph[*it].name);
                     }
 
-                  } else { // The input graph is undirected
+                    for ( auto it = vp.first; it != vp.second; ++it ) {
+                        auto u = *it;
+                        auto idxU = Graph[u].idx;
+                        if( isLostNode(Graph[u].name) ) { continue; }
+
+                        for ( auto it2 = it; it2 != vp.second; ++it2 ) {
+                            auto v = *it2;
+                            auto idxV = Graph[v].idx;
+                            if( isLostNode(Graph[v].name) ) { continue; }
+
+                            auto i1 = std::min(idxU, idxV);
+                            auto i2 = std::max(idxU, idxV);
+                            
+                            if ( Utils::Trees::sameSpecies( tree, i1, i2 ) ) {
+                                keyList.emplace_back( H->index(FlipKey(i1, i2, FlipState::both)) );
+                            }
+                        }
+                    }
+
+                    // Build a name -> vertex map for easy access of edges
+                    unordered_map<string, VertexT> nameVertMap;
+                    for ( auto it = vp.first; it != vp.second; ++it ) {
+                        nameVertMap[Graph[*it].name] = *it;
+                    }
+
+     
+                    // LEAF COST DICT
+                    MultiOpt::slnDictT slnDict;
+                    slnDict.resize(order.size());
+                    if ( undirected ) {
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    } else {
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    }
+                    // DONE LEAF COST DICT
+
+                    for ( auto& cvtest : crossValTests.cvSets ) {
+                        
+                        std::vector<double> weights;
+                        weights.reserve(boost::num_edges(Graph));
+
+                        // ------- Remove the edges from the graph
+                        for ( auto& stredge : cvtest.edges ) {
+                            auto u = nameVertMap[stredge.u];
+                            auto v = nameVertMap[stredge.v];
+
+                            EdgeT edge; bool exists;
+                            std::tie(edge,exists) = boost::edge(u,v,Graph);
+                            weights.emplace_back(Graph[edge].weight);
+                            boost::remove_edge(u,v,Graph);
+
+                            auto idxU = Graph[u].idx; auto idxV = Graph[v].idx;
+                            if ( idxU > idxV ) { std::swap(idxU, idxV); }
+                            auto edgeKey = H->index(FlipKey( idxU, idxV, FlipState::both ));
+                            auto noEdgeKey = H->index(FlipKey( idxU, idxV, FlipState::none ));
+                            // it no longer exists so this costs something
+                            auto prevExistCost = slnDict[edgeKey][0].cost;
+                            auto prevNoExistCost = slnDict[noEdgeKey][0].cost;
+                            if ( prevExistCost > 0.0 or prevNoExistCost == 0.0 ) {
+                                std::cerr << "WTF?!\n";
+                                std::abort();
+                            }
+                            slnDict[edgeKey][0].cost = deletionCost;
+                            // this is now free
+                            slnDict[noEdgeKey][0].cost = 0.0;
+                        }
+                        std::cerr << "\n";
+                        // ------- Done removing edges
+                        
+                        string reconFileName = boost::str( boost::format("%1%/%2%.txt") % outputName % cvtest.name );
+                        performReconstruction( reconFileName, slnDict );
+
+                        // ------- Put the edges back into the graph
+                        size_t weightIdx = 0;
+                        for ( auto& stredge : cvtest.edges ) {
+                            auto u = nameVertMap[stredge.u];
+                            auto v = nameVertMap[stredge.v];
+                            auto weight = weights[weightIdx];
+                            ++weightIdx;
+                            // Add the edge back to the graph
+                            EdgeT edge; bool exists;
+                            std::tie(edge, exists) = boost::add_edge(u,v,Graph);
+                            Graph[edge].weight = weight;
+
+                            auto idxU = Graph[u].idx; auto idxV = Graph[v].idx;
+                            if ( idxU > idxV ) { std::swap(idxU, idxV); }
+                            auto edgeKey = H->index(FlipKey( idxU, idxV, FlipState::both ));
+                            auto noEdgeKey = H->index(FlipKey( idxU, idxV, FlipState::none ));
+                            // Put the leaf cost dictionary back to the original state
+                            slnDict[edgeKey][0].cost = 0.0;
+                            slnDict[noEdgeKey][0].cost = creationCost;
+
+                        }   
+                        // ------- Done putting back
+                    }
+
+                    // ************ ORIGINAL CROSS VALIDATION CODE ************ 
+                    // VertexT u,v;
+                    // for( auto& uv : edges ) {
+                    //     std::tie(u,v) = uv;
+                    //     EdgeT edge; bool exists;
+                    //     std::tie(edge,exists) = boost::edge(u,v,Graph);
+                    //     auto weight = Graph[edge].weight;
+                    //     // Remove the edge from the graph
+                    //     boost::remove_edge(u,v,Graph);
+
+                    //     // Modify the leaf cost dictionary
+                    //     auto idxU = Graph[u].idx;
+                    //     auto idxV = Graph[v].idx;
+                    //     if ( idxU > idxV ) { std::swap(idxU, idxV); }
+                    //     auto edgeKey = H->index(FlipKey( idxU, idxV, FlipState::both ));
+                    //     auto noEdgeKey = H->index(FlipKey( idxU, idxV, FlipState::none ));
+
+                    //     // it no longer exists so this costs something
+                    //     slnDict[edgeKey][0].cost = deletionCost;
+                    //     // this is now free
+                    //     slnDict[noEdgeKey][0].cost = 0.0;
+
+                    //     // Perform the reconstruction
+                    //     auto nameU = Graph[u].name; auto nameV = Graph[v].name;
+                    //     auto reconFileName = boost::str( boost::format("%1%/removed@%2%#%3%@txt") % outputName % nameU % nameV );
+                    //     performReconstruction( reconFileName, slnDict );
+
+                    //     // Add the edge back to the graph
+                    //     std::tie(edge, exists) = boost::add_edge(u,v,Graph);
+                    //     Graph[edge].weight = weight;
+
+                    //     // Put the leaf cost dictionary back to the original state
+                    //     slnDict[edgeKey][0].cost = 0.0;
+                    //     slnDict[noEdgeKey][0].cost = creationCost;
+
+                    // }
+                    // ************ END OF ORIGINAL CROSS VALIDATION CODE ************ 
+
+                  } else { // The input graph is directed
                     auto& Graph = get<directedGraphT>(G);
                     typedef typename boost::graph_traits< directedGraphT >::edge_descriptor EdgeT;
                     typedef typename boost::graph_traits< directedGraphT >::vertex_descriptor VertexT;
@@ -560,6 +709,17 @@ int main( int argc, char **argv ) {
                         edges.push_back(make_tuple( boost::source(*eit,Graph), boost::target(*eit, Graph) ));
                     }
 
+                    // LEAF COST DICT
+                    MultiOpt::slnDictT slnDict;
+                    slnDict.resize(order.size());
+                    if ( undirected ) {
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    } else {
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    }
+                    // DONE LEAF COST DICT
+
+                    /** original Leave-one-out cross-validation **/
                     VertexT u,v;
                     for( auto& uv : edges ) {
                         std::tie(u,v) = uv;
@@ -572,20 +732,31 @@ int main( int argc, char **argv ) {
                         // Perform the reconstruction
                         auto nameU = Graph[u].name; auto nameV = Graph[v].name;
                         auto reconFileName = boost::str( boost::format("%1%/removed@%2%#%3%@txt") % outputName % nameU % nameV );
-                        performReconstruction( reconFileName );
+                        performReconstruction( reconFileName, slnDict );
 
                         // Add the edge back to the graph
                         std::tie(edge, exists) = boost::add_edge(u,v,Graph);
                         Graph[edge].weight = weight;
                     }
+
+
+                  }
                   }
                   break;
 
                 case false:
-                  performReconstruction( outputName );
-                  std::cerr << "HERE\n";
-                  std::exit(1);
-                  break;
+                    MultiOpt::slnDictT slnDict;
+                    slnDict.resize(order.size());
+                    if ( undirected ) {
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    } else {
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    }
+
+                    performReconstruction( outputName, slnDict );
+                    std::cerr << "HERE\n";
+                    std::exit(1);
+                    break;
             }
         }
 

@@ -2084,7 +2084,7 @@ bool viterbiCountNew(
     countDictT &countDict,            //<! Holds the number of ways of getting each vertex & cost 
     const size_t &k,
     const string &outputName, 
-    const vector<FlipKey> &outputKeys, 
+    const vector<size_t> &outputKeys, 
     const double &beta 
     ) {
 
@@ -2311,7 +2311,7 @@ bool viterbiCountNew(
         for ( size_t i = 0; i < maxDeriv; ++i ) {
             // The i-th cost class for this node
             auto& cc = tkd[*vit][i];
-            auto scoreClassWeight = std::log(alphas[i]);
+            auto scoreClassWeight = alphas[i];
             // testing
             //double tprob = 0.0;
 
@@ -2415,8 +2415,16 @@ bool viterbiCountNew(
         ++i;
     }
 
-    //bool restrictOutput = (outputKeys.size() != 0);
-    bool restrictOutput = false;
+
+    std::vector<size_t> outputInds;
+    if ( outputKeys.size() > 0 ) {
+        outputInds = outputKeys;
+    } else {
+        outputInds.resize(order.size(), 0);
+        std::iota(outputInds.begin(), outputInds.end(), 0);
+    }
+
+    //bool restrictOutput = false;
     string fname = outputName;
     std::fstream output( fname, std::fstream::out | std::fstream::trunc );
 
@@ -2425,7 +2433,7 @@ bool viterbiCountNew(
     // for ( auto kv : probMap ) {
     //     size_t vid = kv.first;
     for ( size_t vid : boost::irange(size_t{0}, order.size()) ) {
-        
+    //for ( size_t vid : outputInds ) { 
         auto key = H->vertex(vid);
         if ( H->incident(vid).size() == 0 && vid != rootIdFlip && vid != rootIdNoFlip ) {
             if ( outProbMap[vid] != probMap[vid] ) { //&& outProbMap[vid] > probMap[vid] ) {
@@ -2436,7 +2444,8 @@ bool viterbiCountNew(
     }
 
 
-    for ( size_t vid : boost::irange(size_t{0}, order.size()) ) {
+    //for ( size_t vid : boost::irange(size_t{0}, order.size()) ) {
+    for ( size_t vid : outputInds ) {
         auto& key = H->vertex(vid);
         auto fkey = flipBoth(key);
         auto oid = H->index(fkey);
@@ -2458,9 +2467,6 @@ bool viterbiCountNew(
         auto approxProb = outProbMap[vid];
 
         bool writeOut = true;
-        if ( restrictOutput ) {
-            writeOut = ( std::find( outputKeys.begin(), outputKeys.end(), key ) != outputKeys.end() );
-        }
 
         if ( approxProb > 0.0 && writeOut ) {
             auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
@@ -2616,7 +2622,7 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
                     const vector<size_t> &order,
                     slnDictT &slnDict,
                     const string &outputName,
-                    const vector<FlipKey> &outputKeys ) {
+                    const vector<size_t> &outputKeys ) {
 
     // Compute the *weighted* probability of each edge being in
     // the top k distinct scoring solutions
@@ -2788,12 +2794,23 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
         */
     }
 
-    //bool restrictOutput = (outputKeys.size() != 0);
     bool restrictOutput = false;
+    std::vector<size_t> outputInds;
+    if ( outputKeys.size() > 0 ) {
+        restrictOutput = true;
+        outputInds = outputKeys;
+    } else {
+        outputInds.resize(order.size(), 0);
+        std::iota(outputInds.begin(), outputInds.end(), 0);
+    }
+
+
+    //bool restrictOutput = false;
     string fname = outputName;
     std::fstream output( fname, std::fstream::out | std::fstream::trunc );
 
-    for ( size_t vid = 0; vid < H->order(); ++vid ) { // order.rbegin(); vit != order.rend(); ++vit ) {
+    //for ( size_t vid = 0; vid < H->order(); ++vid ) { // order.rbegin(); vit != order.rend(); ++vit ) {
+    for ( size_t vid : outputInds ) {
         auto key = H->vertex(vid);
         auto opKey = flipBoth(H->vertex(vid));
         auto opInd = H->index(opKey);
@@ -2808,9 +2825,6 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
         }
         
         bool writeOut = true;
-        if ( restrictOutput ) {
-            writeOut = ( std::find( outputKeys.begin(), outputKeys.end(), key ) != outputKeys.end() );
-        }
 
         if ( approxProb > 0.0 && writeOut ) {
             auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
@@ -2996,7 +3010,7 @@ void insideOutside( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti,
 
 void viterbiCount( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, double penalty, const vector<size_t> &order,
                    slnDictT &slnDict, countDictT &countDict, const size_t &k,
-                   const string &outputName, const vector<FlipKey> &outputKeys, const double &beta ) {
+                   const string &outputName, const vector<size_t> &outputKeys, const double &beta ) {
 
     // Compute the *weighted* probability of each edge being in
     // the top k distinct scoring solutions
@@ -3325,18 +3339,28 @@ void viterbiCount( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, 
 
 
     //bool restrictOutput = (outputKeys.size() != 0);
+    std::vector<size_t> outputInds;
     bool restrictOutput = false;
+    if ( outputKeys.size() > 0 ) {
+        restrictOutput = true;
+        outputInds = outputKeys;
+    } else {
+        outputInds.resize(order.size(), 0);
+        std::iota(outputInds.begin(), outputInds.end(), 0);
+    }
+
     string fname = outputName;
     std::fstream output( fname, std::fstream::out | std::fstream::trunc );
 
     for ( size_t vid = 0; vid < H->order(); ++vid ) { // order.rbegin(); vit != order.rend(); ++vit ) {
-        auto key = H->vertex(vid);
+      auto key = H->vertex(vid);
         if ( H->incident(vid).size() == 0 && vid != rootIdFlip && vid != rootIdNoFlip ) {
-            if ( outProbMap[vid] != probMap[vid] && outProbMap[vid] > probMap[vid] ) {
-                cout << "inProbMap has " << probMap[vid] << ", outProbMap has" << outProbMap[vid] << "\n";
-            }
             outProbMap[vid] = probMap[vid];
         }
+    }
+
+    for ( size_t vid : outputInds ) {
+        auto key = H->vertex(vid);
 
         auto approxInProb = probMap[vid];
         auto approxProb = outProbMap[vid];
@@ -3401,9 +3425,6 @@ void viterbiCount( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, 
         */
         // ====================
         bool writeOut = true;
-        if ( restrictOutput ) {
-            writeOut = ( std::find( outputKeys.begin(), outputKeys.end(), key ) != outputKeys.end() );
-        }
 
         if ( approxProb > 0.0 && writeOut ) {
             auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
@@ -3702,7 +3723,7 @@ void computePosteriors(
     vector<size_t> &order,
     DerivStoreT &derivs,
     const string &outputName,
-    const vector<FlipKey> &outputKeys,
+    const vector<size_t> &outputKeys,
     const double &beta
 ) {
 
@@ -3795,7 +3816,17 @@ void computePosteriors(
 
     //bool restrictOutput = (outputKeys.size() != 0);
 
+    std::vector<size_t> outputInds;
     bool restrictOutput = false;
+    if ( outputKeys.size() > 0 ) {
+        restrictOutput = true;
+        outputInds = outputKeys;
+    } else {
+        outputInds.resize(order.size(), 0);
+        std::iota(outputInds.begin(), outputInds.end(), 0);
+    }
+
+
     string fname = outputName;
     std::fstream output( fname, std::fstream::out | std::fstream::trunc );
 
@@ -3804,14 +3835,14 @@ void computePosteriors(
         if ( H->incident(vid).size() == 0 && vid != rootIdFlip && vid != rootIdNoFlip ) {
             probMap[vid].outProb = probMap[vid].inProb;
         }
+    }
 
+    for ( size_t vid : outputInds ) {
+        auto key = H->vertex(vid);
         auto approxInProb = probMap[vid].inProb;
         auto approxProb = probMap[vid].outProb;
 
         bool writeOut = true;
-        if ( restrictOutput ) {
-            writeOut = ( std::find( outputKeys.begin(), outputKeys.end(), key ) != outputKeys.end() );
-        }
 
         if ( approxProb > 0.0 && writeOut ) {
             auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
@@ -3888,7 +3919,7 @@ template bool MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>( unique_p
         MultiOpt::countDictT &countDict,
         const size_t &k,
         const string &outputName,
-        const vector<FlipKey> &outputKeys,
+        const vector<size_t> &outputKeys,
         const double &beta );
 
 template void MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(
@@ -3898,4 +3929,4 @@ template void MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(
     const vector<size_t> &order,
     slnDictT &slnDict,
     const string &outputName,
-    const vector<FlipKey> &outputKeys );
+    const vector<size_t> &outputKeys );

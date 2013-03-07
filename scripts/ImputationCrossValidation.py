@@ -1,6 +1,6 @@
 """
 
-Usage: ImputationCrossValidation.py PDIR ENET DTREE (cdf|pdf) [--relative] -o FILE [--noself] [--opred=<op>...]
+Usage: ImputationCrossValidation.py PDIR ENET DTREE --cv=<cv> (cdf|pdf) [--relative] -o FILE [--noself] [--opred=<op>...]
 
 Arguments:
    PDIR         Directory containing the cross validation results
@@ -9,6 +9,7 @@ Arguments:
 
 Options:
    -h --help      show this
+   --cv=<cv>      cross validation file
    --relative     compute relative (rather than absolute) ranks
    --noself       skip self-loop test
    --opred=<op>   directories containing other predictions
@@ -17,6 +18,9 @@ Options:
 from docopt import docopt
 
 import os
+import sys
+sys.path.append('../scripts/')
+
 import glob
 import itertools
 from collections import defaultdict
@@ -26,6 +30,9 @@ import ete2
 import numpy as np
 import matplotlib.pyplot as plt
 from progressbar import ProgressBar
+import CrossValidationTools
+
+
 
 def writeAdjList(G, fname):
     with open(fname,'wb') as ofile:
@@ -76,6 +83,8 @@ def computeRank( tfile, tedge, allPossibleEdges, enet, includeSelfLoops, randomi
                 missingEdges.discard((v,u))
 
     assert(len(missingEdges) == 0)
+    for u,v in missingEdges:
+        edgesFromFile.append(Edge(u,v,0.0))
 
     # If we're not testing self-loops, then any self loops should 
     # be removed from the set of possible edges as well as from the
@@ -146,6 +155,87 @@ def main(arguments):
 
     possiblePairs = pairsWithSelf(leaves) if selfLoops else pairsWithoutSelf(leaves)
 
+    sameSpecies = lambda (x,y): x.split('_')[-1] == y.split('_')[-1]
+    allPossibleEdges = filter( sameSpecies, possiblePairs) #pairsWithSelf(leaves) )
+    print(len(allPossibleEdges))
+    relativeRanks = []
+    speciesRanks = defaultdict(list)
+
+    cvtests = CrossValidationTools.parseCrossValidationTest( arguments["--cv"] )
+
+    pfiles = arguments['--opred'] if arguments['--opred'] else []
+
+    with open(arguments['-o'],'wb') as ofile:
+
+        progress = ProgressBar()
+        for fname in progress(glob.glob("{0}/*.txt".format(arguments['PDIR']))):
+            efile = fname.split(os.path.sep)[-1]
+            cvSetName = efile.split('.txt')[0]
+
+            cvset = cvtests.cvSets[cvSetName]
+            
+            for u,v in cvset.edges:
+
+                if not selfLoops and u == v: continue
+            
+                species = u.split('_')[-1]
+
+                tedge = (u,v)
+                rr = computeRank( fname, tedge, allPossibleEdges, extantNetwork, selfLoops, randomize=False )
+                
+                # print(rr)
+                # rrlist = [rr]
+                # for pf in pfiles:
+                #     fn = os.path.sep.join([pf,efile])
+                #     if os.path.exists(fn):
+                #         rrlist.append( computeRank( fn, tedge, allPossibleEdges, extantNetwork, selfLoops, randomize=False ) )
+
+                # rr = sum(rrlist) / float(len(rrlist))
+
+                ofile.write('{0}\t{1}\t{2}\n'.format(tedge[0],tedge[1],rr))
+                relativeRanks.append(rr)
+                speciesRanks[species].append(rr)
+
+    relativeRanks = np.array(relativeRanks)
+
+
+    for k,v in speciesRanks.iteritems():
+        print("MEAN Relative Rank for Species {0}: is {1}".format(k, np.mean(v)))
+        print("MEDIAN Relative Rank for Species {0}: is {1}".format(k, np.median(v)))
+
+    params = { 'font.size' : 20,
+    'lines.linewidth' : 3.0,
+    }
+
+    plt.rcParams.update(params)
+
+    if ( arguments['pdf'] ):
+        plotHistogram(relativeRanks)
+    elif( arguments['cdf'] ):
+        plotCDF(relativeRanks, relative=relative)
+
+    print("MEAN RELATIVE RANK = {0}".format(relativeRanks.mean()))
+    print("MEDIAN RELATIVE RANK = {0}".format(np.median(relativeRanks)))
+
+def oldMain(arguments):
+    print(arguments)
+    relative = arguments['--relative']
+    selfLoops = not arguments['--noself']
+    extantNetwork = nx.read_adjlist(arguments['ENET'])
+
+    if not selfLoops:
+        for u in extantNetwork.nodes():
+            if extantNetwork.has_edge(u,u):
+                extantNetwork.remove_edge(u,u)
+
+    pxml = ete2.Phyloxml()
+    pxml.build_from_file( arguments['DTREE'] )
+    p = pxml.phylogeny[0]
+    
+    leaves = filter( lambda x : x.find('LOST') == -1, pxml.phylogeny[0].get_leaf_names() )
+
+    possiblePairs = pairsWithSelf(leaves) if selfLoops else pairsWithoutSelf(leaves)
+
     allPossibleEdges = filter( lambda (x,y): x.split('_')[-1] == y.split('_')[-1], possiblePairs) #pairsWithSelf(leaves) )
     print(len(allPossibleEdges))
     relativeRanks = []
@@ -153,6 +243,7 @@ def main(arguments):
 
     pfiles = arguments['--opred'] if arguments['--opred'] else []
     with open(arguments['-o'],'wb') as ofile:
+
         progress = ProgressBar()
         for fname in progress(glob.glob("{0}/*@txt".format(arguments['PDIR']))):
             efile = fname.split(os.path.sep)[-1]
@@ -196,6 +287,8 @@ def main(arguments):
 
     print("MEAN RELATIVE RANK = {0}".format(relativeRanks.mean()))
     print("MEDIAN RELATIVE RANK = {0}".format(np.median(relativeRanks)))
+
+
 
 if __name__ == "__main__":
     import sys

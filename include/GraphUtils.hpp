@@ -44,13 +44,20 @@ namespace GraphUtils {
         double weight;
     };
 
+
     typedef adjacency_list<boost::hash_setS, vecS, boost::directedS, GraphUtils::Node, GraphUtils::Edge > directedGraphT;
 
     typedef adjacency_list<boost::hash_setS, vecS, boost::undirectedS, GraphUtils::Node, GraphUtils::Edge > undirectedGraphT;
 
+    template< typename GraphT >
+    struct TreeGraphPair {
+        int treeID;
+        typename boost::graph_traits< GraphT >::vertex_descriptor graphVert;
+    };
+
 
     template<typename GraphT>
-    void readFromAdjacencyList( const string& fname, unordered_map<string,int>& nameMap, GraphT& G ) {
+    void readFromAdjacencyList( const string& fname, GraphT& G ) {
         typedef typename boost::graph_traits< GraphT >::vertex_descriptor Vertex;
         typedef typename boost::graph_traits< GraphT >::edge_descriptor Edge;
         typedef unordered_map<string,Vertex> svMap;
@@ -63,6 +70,7 @@ namespace GraphUtils {
         string line;
         typedef vector< string > splitVectorT;
         ifstream gfile(fname);
+        size_t numInsertedVerts = 0;
         if ( gfile.is_open() ) {
             while( gfile.good() ) {
                 getline( gfile, line, '\n' );
@@ -72,37 +80,46 @@ namespace GraphUtils {
                 splitVectorT splitVec;
                 split( splitVec, vline, is_any_of(" \t"), token_compress_on );
 
-                if ( splitVec.size() > 0 ) {
+                if ( splitVec.size() > 0  and vline.size() > 0 ) {
                     auto fromVert = splitVec[0];
                     boost::tie( pos, inserted ) = namePosMap.insert( std::make_pair(fromVert,Vertex()) );
                     if (inserted) {
+                        ++numInsertedVerts;
                         u = add_vertex(G);
                         G[u].name = fromVert;
-                        G[u].idx = nameMap[fromVert];
+                        // This will happen later
+                        // G[u].idx = nameMap[fromVert];
                         pos->second = u;
                     } else {
                         u = pos->second;
                     }
 
-                    auto tgtIt = splitVec.begin(); tgtIt++;
-                    for_each( tgtIt, splitVec.end(), [&](const string& tgt) {
+                    for( auto tgtIt = splitVec.begin() + 1; tgtIt != splitVec.end(); ++tgtIt ) {
+                        auto& tgt = *tgtIt;
+                        boost::tie(pos, inserted) = namePosMap.insert(std::make_pair(tgt, Vertex()));
+                        if (inserted) {
+                            ++numInsertedVerts;
+                            v = add_vertex(G);
+                            G[v].name = tgt;
+                            // This will happen later
+                            // G[v].idx = nameMap[tgt];
+                            pos->second = v;
+                        } else {
+                            v = pos->second;
+                        }
 
-                            boost::tie(pos, inserted) = namePosMap.insert(std::make_pair(tgt, Vertex()));
-                            if (inserted) {
-                                v = add_vertex(G);
-                                G[v].name = tgt;
-                                G[v].idx = nameMap[tgt];
-                                pos->second = v;
-                            } else {
-                                v = pos->second;
-                            }
-
-                            Edge e; bool i;
-                            boost::tie(e,i) = add_edge(u,v,G);
-                            G[e].weight = 1.0;
-                        } );
+                        Edge e; bool i;
+                        boost::tie(e,i) = add_edge(u,v,G); 
+                        G[e].weight = 1.0;
+                    } 
                 }
 
+            }
+            
+            if ( namePosMap.size() != boost::num_vertices(G) ) {
+                std::cerr << "(namePosMap.size() = " << namePosMap.size() << ") != ("
+                          << "(order(G) = " << boost::num_vertices(G) << ") : Error building the graph, aborting\n";
+                std::abort();
             }
         }
         gfile.close();
@@ -110,7 +127,7 @@ namespace GraphUtils {
     }
 
     template<typename GraphT>
-    void readFromMultilineAdjacencyList( const string& fname, unordered_map<string,int>& nameMap, GraphT& G ) {
+    void readFromMultilineAdjacencyList( const string& fname, GraphT& G ) {
         typedef typename boost::graph_traits< GraphT >::vertex_descriptor Vertex;
         typedef typename boost::graph_traits< GraphT >::edge_descriptor Edge;
 
@@ -138,7 +155,7 @@ namespace GraphUtils {
                 splitVectorT splitVec;
                 split( splitVec, vline, is_any_of(" \t"), token_compress_on );
 
-                if ( splitVec.size() > 0 ) {
+                if ( splitVec.size() > 0  and vline.size() > 0 ) {
                     auto fromVert = splitVec[0];
                     remEdgeLine = lexical_cast<size_t>(splitVec[1]);
 
@@ -146,7 +163,8 @@ namespace GraphUtils {
                     if (inserted) {
                         u = add_vertex(G);
                         G[u].name = fromVert;
-                        G[u].idx = nameMap[fromVert];
+                        // This will happen later
+                        // G[u].idx = nameMap[fromVert];
                         pos->second = u;
                     } else {
                         u = pos->second;
@@ -167,7 +185,8 @@ namespace GraphUtils {
                         if (inserted) {
                             v = add_vertex(G);
                             G[v].name = toVert;
-                            G[v].idx = nameMap[toVert];
+                            // This will happen later
+                            // G[v].idx = nameMap[toVert];
                             pos->second = v;
                         } else {
                             v = pos->second;
@@ -180,6 +199,12 @@ namespace GraphUtils {
                     }
                 }
 
+            }
+
+            if ( namePosMap.size() != boost::num_vertices(G) ) {
+                std::cerr << "(namePosMap.size() = " << namePosMap.size() << ") != ("
+                          << "(order(G) = " << boost::num_vertices(G) << ") : Error building the graph, aborting\n";
+                std::abort();
             }
         }
         gfile.close();

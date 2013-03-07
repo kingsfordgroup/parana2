@@ -2,7 +2,7 @@
 Usage: ComputeAllEdges.py --method=<m> --recdir=<r> --ortho=<o> --outdir=<od> [--beta=<b>]
 
 Options:
---method=<m>  Method to use to compute the cross validation results {Parana | RWS}
+--method=<m>  Method to use to compute the cross validation results {Parana | RWS | CV}
 --recdir=<r>  Folder containing reconciled trees
 --outdir=<o>  Folder to which results should be written
 --ortho=<o>   Orthogy group file
@@ -23,6 +23,7 @@ from subprocess import call
 import os, errno
 from ete2 import Phyloxml
 from progressbar import ProgressBar
+from lxml import etree as ET
 
 sys.path.append("../../rws")
 
@@ -55,11 +56,19 @@ def constructParanaCall(gfile, ofilename, beta, og1, og2, t1name, t2name):
 
   return callargs
 
-def runRWS(G, ofilename):
+def runRWS(G, redge, ofilename):
   import rwsPredict
-
+  
+  vertToInd = { v:i for i,v in enumerate(G.nodes()) }
   A = np.array(nx.adjacency_matrix(G))
+
+  A -= np.diag(np.diag(A))
   A += np.eye(A.shape[0])
+
+  u = vertToInd[redge[0]]
+  v = vertToInd[redge[1]]
+  A[u][v] = 0.0
+  A[v][u] = 0.0
 
   G2 = rwsPredict.corrGraph(G, A)
   with open(ofilename,'wb') as ofile:
@@ -68,11 +77,14 @@ def runRWS(G, ofilename):
 def main(args):
   usingParana = (args["--method"].upper() == "PARANA")
   usingRWS = (args["--method"].upper() == "RWS")
+  outputCVFile = (args["--method"].upper() == "CV")
   (spec, odict) = parseOrthoFile( args["--ortho"] ) #sys.argv[1] )
   recDir = args["--recdir"]#sys.argv[2]
   ofname = args["--outdir"]#sys.argv[3]
   beta = float(args["--beta"]) 
-  mkdir_p(ofname)
+  
+  if not outputCVFile:
+    mkdir_p(ofname)
 
   getName = lambda x : x.Name
 
@@ -90,6 +102,10 @@ def main(args):
     newGraph.add_edges_from( relevantEdges )
     return newGraph, crossValidationEdges
 
+
+  if outputCVFile:
+    root = ET.Element("cvtest", name="herpes_loocv")
+    
 
   orthoGroups = odict.keys()
   progress = ProgressBar(len(orthoGroups)*len(orthoGroups)).start()
@@ -119,13 +135,21 @@ def main(args):
                 os.system(" ".join(callargs)+"> /dev/null 2>&1")
             elif usingRWS:
               copy = alist.copy()
-              copy.remove_edge(e[0],e[1])
-              runRWS(copy, ofileName)
+              #copy.remove_edge(e[0],e[1])
+              runRWS(copy, e, ofileName)
+            elif outputCVFile:
+              tset = ET.SubElement(root, "testset", name="fold_{0}".format(i))
+              u,v = sorted((e[0],e[1]))
+              ET.SubElement(tset, "edge", u=u, v=v)      
             else:
               raise "Method must be one of {Parana|RWS}"
 
         #p = subprocess.Popen( callargs , shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE )
         #out, err = p.communicate()
+      if outputCVFile:
+        with open(ofname,'wb') as ofile:
+          ofile.write(ET.tostring(root, pretty_print=True))
+          
   progress.finish()
   sys.exit(1)
 
