@@ -72,19 +72,26 @@ def computeRank( tfile, tedge, allPossibleEdges, enet, includeSelfLoops, randomi
 
     import random
     edgesFromFile = []
+    foundTarget = False
     with open(tfile,'rb') as ifile:
         for l in ifile:
             u,v,f,p = l.strip().split()
             p = float(p)
             if (u,v) in missingEdges or (v,u) in missingEdges: #(u in enet) and (v in enet) and (not enet.has_edge(u,v)):
+            #if (u in enet) and (v in enet) and (not enet.has_edge(u,v)):
                 if randomize: p = random.uniform(0.0,1.0)
+                if sorted(tedge) == sorted((u,v)):
+                    foundTarget = True
                 edgesFromFile.append(Edge(u,v,p))
                 missingEdges.discard((u,v))
                 missingEdges.discard((v,u))
 
-    assert(len(missingEdges) == 0)
+    #print("foundTarget = {0}".format(foundTarget))
+    #assert(len(missingEdges) == 0)
     for u,v in missingEdges:
         edgesFromFile.append(Edge(u,v,0.0))
+
+    #print("Edges from file {0}".format(len(edgesFromFile)))
 
     # If we're not testing self-loops, then any self loops should 
     # be removed from the set of possible edges as well as from the
@@ -104,6 +111,7 @@ def computeRank( tfile, tedge, allPossibleEdges, enet, includeSelfLoops, randomi
     if rank is None:
         raise 'Hell!'
 
+    print(rank, len(edgesFromFile)-1)
     relativeRank = rank / float(len(edgesFromFile)-1)
     enet.add_edge(tedge[0],tedge[1])
 
@@ -157,7 +165,6 @@ def main(arguments):
 
     sameSpecies = lambda (x,y): x.split('_')[-1] == y.split('_')[-1]
     allPossibleEdges = filter( sameSpecies, possiblePairs) #pairsWithSelf(leaves) )
-    print(len(allPossibleEdges))
     relativeRanks = []
     speciesRanks = defaultdict(list)
 

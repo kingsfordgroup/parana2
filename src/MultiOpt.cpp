@@ -7,6 +7,7 @@
 #include "combination.hpp"
 
 #include <stack>
+#include <deque>
 #include <cmath>
 #include <utility>
 #include <cln/float.h>
@@ -320,12 +321,13 @@ double existencePenalty( const TreeInfo &ti, const T &vert, double penalty, doub
     // auto d2 = const_cast<TreeInfo&>(ti).extantInterval[vert.v()].birth;
 
     double res2 = 0.0;
-    auto dist = ti.intervalDistance( vert.u(), vert.v() );
-    auto mult = (vert.state() == FlipState::none) ? 1.0 : 1.0;    
-    if ( dist > 0.0 ) { dist = 1.0; }
+    //auto dist = ti.intervalDistance( vert.u(), vert.v() );
+    //auto mult = (vert.state() == FlipState::none) ? 1.0 : 1.0;    
+    //dist = std::max( dist, 1.0 );
     //if ( dist > 0.5 ) { dist = 10.0; } else { dist = 0.0; }
     //res2 = travWeight  + mult * (std::exp(penalty*dist*dist) - 1.0);
-    res2 = travWeight + travWeight * penalty;// * std::exp(dist);
+    res2 = travWeight + travWeight * penalty;//std::exp(dist);
+    //res2 = travWeight + travWeight * penalty * dist;
 
     // if ( travWeight != res2 ) {
     //     std::cerr << "before penalty = " << travWeight << ", after penalty = " << res2 << "\n";
@@ -1348,7 +1350,7 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
                 !(differentExtantNetworks(ti, u, v) or
                   ti.inSubnodesOf(u, v) or
                   ti.inSubnodesOf(v, u) or
-                  isLost(u) or isLost(v)) ) {
+                  (isLost(u) or isLost(v))) ) {
 
                 addHypernode(u, v, FlipState::none, t, ti, slnSpaceGraph);
 
@@ -1713,6 +1715,7 @@ void leafCostDict(
             } // ( u != v )
         } // ( lostU || lostV )
     } // loop over leaf hypernodes
+
 }
 
 template <typename CostClassT>
@@ -1959,14 +1962,17 @@ vector<double> computeAlphasDouble( const double &bscale, const vector<MultiOpt:
     double diff = (worstScore == bestScore) ? 1.0 : worstScore - bestScore; // std::max(0.01, worstScore - bestScore);
     size_t N = slnVec.size();
 
-    //double scale = estimateThermodynamicBeta( slnVec, bestScore ); // (6.9*k) / diff; // (1.25 * k) / diff;
+    //double scale = estimateThermodynamicBeta( slnVec, bestScore ); 
+    //double scale = (6.9*k) / diff; // (1.25 * k) / diff;
     double scale = bscale / diff;
     //double scale = bscale;
 
     double sum(0.0);
     size_t i = 0;
     for (const auto & e : slnVec) {
-        double a = std::exp( -std::abs( (bestScore - e.score) * scale) );
+        auto x = e.score - bestScore;
+        double a = std::exp( -std::abs( x * scale ) );
+        
         scores.emplace_back( a ); 
         sum += scores.back();
         i += 1;
@@ -2015,7 +2021,8 @@ vector<CostClassT> computeKBest(const size_t &vid,
         auto cost = round3(getCost(tkd, bp, eid, H));
 
         // Again, check Boost emplace bug [Ticket #8195]
-        vpq.emplace( cost, eid, bp );
+        // vpq.emplace(cost, eid, bp);
+        vpq.emplace(EdgeDerivation(cost, eid, bp));
 
         // Fill in the size array for this edge
         SizeVector sizes(edge.tail().size(), 0);
@@ -2458,7 +2465,7 @@ bool viterbiCountNew(
                 outProbMap[vid] *= norm;
                 outProbMap[oid] *= norm;
             } else {
-                outProbMap[vid] = outProbMap[oid] = 0.5;
+                outProbMap[vid] = outProbMap[oid] = 0.0;
             }
 
         }
@@ -2468,7 +2475,7 @@ bool viterbiCountNew(
 
         bool writeOut = true;
 
-        if ( approxProb > 0.0 && writeOut ) {
+        if ( writeOut ) {
             auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
             if ( key.state() != FlipState::none ) {
                 output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
@@ -2479,6 +2486,130 @@ bool viterbiCountNew(
     output.close();
     LOG_INFO(log) << "leaving viterbiCountNew\n";
     std::cerr << "\n";
+
+    /******
+    *
+    * Code for predicting duplication order -- should be it's own
+    * function eventually
+    *
+    ******/
+    auto dumpRelativeDuplicationOrder = [&]( const std::string ofname,
+                                             unordered_map<int, vector<int>>& ancestorMap ) -> void {
+         
+         std::fstream dupOut( ofname, std::fstream::out | std::fstream::trunc );
+         boost::dynamic_bitset<> checked(order.size());
+
+         for ( auto i : order ) {
+            if ( not checked[i] ){
+                auto& key = H->vertex(i);
+                auto opKey = flipBoth(key);
+                auto opInd = H->index(opKey);
+
+                auto U = key.u();
+                auto V = key.v();
+
+                auto nameU = t->getNodeName(U);
+                auto nameV = t->getNodeName(V);
+
+                if ( nameU > nameV ) {
+                    std::swap(nameU, nameV);
+                    std::swap(U, V);
+                }
+
+                auto uIsInternal = !t->isLeaf(U);
+                auto vIsInternal = !t->isLeaf(V);
+                auto parentsInSameSpecies = Utils::Trees::sameSpecies(t, U, V );
+                auto bothInternal = uIsInternal and vIsInternal;
+
+                if ( (U != V) and parentsInSameSpecies and bothInternal ) {
+                    int LU, RU, LV, RV;
+                    LU = RU = LV = RV = -1;
+
+                    auto sonsU = t->getSonsId(U);
+                    LU = sonsU[0]; RU = sonsU[1]; 
+                    if ( LU > RU ) { std::swap(LU,RU); }
+
+                    auto sonsV = t->getSonsId(V);
+                    LV = sonsV[0]; RV = sonsV[1]; 
+                    if ( LV > RV ) { std::swap(LV,RV); }
+
+                    double probVFirst = 0.0;
+                    // For every ancestor of U (including U itself), did V duplicate before this
+                    // ancestor?
+                    for ( auto A : ancestorMap[U] ) {
+                        if ( std::find(ancestorMap[V].begin(), ancestorMap[V].end(), A) != ancestorMap[V].end() ) { continue; }
+                        vector<FlipState> states = {FlipState::both, FlipState::none};
+                        for ( auto s : states ) {
+                            auto i1 = H->index(FlipKey(LV, A, s));
+                            auto i2 = H->index(FlipKey(RV, A, s));
+                            if ( i1 < order.size() ) { probVFirst += outProbMap[i1]; }
+                            if ( i2 < order.size() ) { probVFirst += outProbMap[i2]; }
+                        }
+
+                    }
+
+
+                    double probUFirst = 0.0;
+                    
+                    // For every ancestor of V (including V itself), did U duplicate before this
+                    // ancestor?
+                    for ( auto A : ancestorMap[V] ) {
+                        if ( std::find(ancestorMap[U].begin(), ancestorMap[U].end(), A) != ancestorMap[U].end() ) { continue; }                        
+                        vector<FlipState> states = {FlipState::both, FlipState::none};
+                        for ( auto s : states ) {
+                            auto i1 = H->index(FlipKey(LU, A, s));
+                            auto i2 = H->index(FlipKey(RU, A, s));
+                            if ( i1 < order.size() ) { probUFirst += outProbMap[i1]; }
+                            if ( i2 < order.size() ) { probUFirst += outProbMap[i2]; }
+                        }
+
+                    }
+
+
+
+                    auto psum = probUFirst + probVFirst;
+                    int o = 0;
+                    if ( psum > 0.0 ) {
+                        std::cerr << "probU = " << probUFirst 
+                                  << ", probV = " << probVFirst << "\n";
+                        if ( probUFirst > probVFirst ) {
+                            o = -1;
+                        } else {
+                            o = 1;
+                        }
+                    } 
+
+                    dupOut << t->getNodeName(U) << '\t'
+                    << t->getNodeName(V) << '\t'
+                    << o << '\n';
+                   }
+
+                checked[i] = 1;
+                checked[opInd] = 1;
+            }
+
+         }
+         dupOut.close();
+
+    };
+
+    bool writeRelativeDupOrder = false;
+    if ( writeRelativeDupOrder ) {
+        string fname{"parana.ord"};
+        unordered_map<int, vector<int>> ancestormap;
+        for ( auto n : t->getNodesId() ) {
+            vector<int> ancestors = {n};
+            for ( auto a : t->getAncestorsId(n) ) {
+                if ( Utils::Trees::sameSpecies(t, n, a ) ) {
+                    ancestors.emplace_back(a);
+                } 
+            }
+            ancestormap[n] = std::move(ancestors);
+        }
+        dumpRelativeDuplicationOrder(fname, ancestormap);
+    }
+
+
 
     //boost::singleton_pool<boost::pool_allocator_tag, sizeof(size_t)>::release_memory();
     return true;
@@ -3440,7 +3571,132 @@ void viterbiCount( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, 
 }
 
 
+template <typename CostClassT>
+bool viterbi(
+    unique_ptr<ForwardHypergraph> &H, 
+    TreePtrT &t, 
+    TreeInfo &ti, 
+    double penalty, 
+    const vector<size_t> &order, 
+    slnDictT &slnDict,
+    const string& outputName ) { 
 
+    // Compute the *weighted* probability of each edge being in
+    // the top k distinct scoring solutions
+    cpplog::FileLogger log( "log.txt", true );
+
+    size_t maxID = *(std::max_element(order.begin(), order.end()));
+
+    // Dictionary that holds the top-k cost classes for each
+    // vertex, as well as other relevant information
+    vector< vector<CostClassT> > tkd(maxID + 1, vector<CostClassT>() ); //unordered_map< size_t, vector<CostClass> > tkd;
+
+    auto vstr = [&]( const FlipKey & vert ) -> string {
+        auto uname = t->getNodeName(vert.u());
+        auto vname = t->getNodeName(vert.v());
+        if (uname > vname) {
+            auto tmp = vname;
+            vname = uname;
+            uname = tmp;
+        }
+        auto fstr = vert.f() ? "true" : "false";
+        auto rstr = vert.r() ? "true" : "false";
+        return uname + "\t" + vname + "\t" + fstr + "\t" + rstr;
+    };
+
+    auto printKey = [&](const FlipKey& vert) -> string {
+        auto uname = t->getNodeName(vert.u());
+        auto vname = t->getNodeName(vert.v());
+        if (uname > vname) {
+            auto tmp = vname;
+            vname = uname;
+            uname = tmp;
+        }
+        return uname + "\t" + vname;
+    };
+
+    double costsum = 0.0;
+
+    // Each leaf has a single solution which is, by definition, of optimal cost
+    for ( const auto & vit : order ) {
+        if ( H->incident(vit).size() == 0 ) {
+            tkd[vit] = { CostClassT(slnDict[vit][0].cost) };
+            CountedDerivation cderiv( slnDict[vit][0].cost, std::numeric_limits<size_t>::max(), vector<size_t, CustomAllocator<size_t>>(), BigInt(1) );
+            tkd[vit].back().appendToCount( cderiv );
+            //countDict[vit].emplace_back( slnDict[vit][0].cost, 1 );
+            costsum += slnDict[vit][0].cost;
+        }
+    }
+
+    cerr << "COSTSUM = " << costsum << "\n";
+    cerr << "ORDER SIZE = " << order.size() << "\n";
+    //cerr << "SIZE OF COUNT DICT = " << countDict.size() << "\n";
+    
+
+    typedef size_t edgeIdT;
+    auto N = order.size();
+
+    ez::ezETAProgressBar eta(order.size()); eta.start();
+
+    std::ofstream ofile(outputName);
+
+    // For each vertex, in topological order (up)
+    for ( auto vit = order.begin(); vit != order.end(); ++vit, ++eta ) {
+
+        if ( H->incident(*vit).size() != 0 ) {
+            auto vert = H->vertex(*vit);
+            tkd[*vit] = std::move( computeKBest(*vit, 1, tkd, H) );
+
+
+        // Find the minimum cost edge
+            Google<Derivation::flipT>::Set fs;
+            fs.set_empty_key( Derivation::flipT(-1, -1, "") );
+            slnDict[*vit][0] = Derivation( tkd[*vit].front().cost(), 0, vector<size_t>(), fs);
+        }
+    }
+
+    eta.reset(order.size()); eta.start();
+
+    // For each vertex, in topological order (up)
+    size_t root = order.back();
+    std::deque<size_t> q;
+    q.push_back(root);
+
+    while (!q.empty()) {
+        std::cerr << q.size() << "\n";
+        auto vind = q.front();
+        auto vert = H->vertex(vind);
+        q.pop_front();
+        auto& cc = tkd[vind][0];
+        // Find the newest edge
+        if  (cc.usedEdges().size() > 0) {
+            size_t e{0};
+            double minWeight = -1.0;//std::numeric_limits<double>::max();
+            for (auto eid : cc.usedEdges()) {
+                auto newWeight = H->edge(eid).weight();
+                if (newWeight > minWeight) {
+                    e = eid;
+                    minWeight = newWeight;
+                }
+            }
+            //auto& e = cc.usedEdges().front();
+            auto tail = H->getTail(e);
+
+            for (auto tn : tail) { q.push_back(tn); }
+
+            auto ft = flipType(vert, H->vertex(tail.front()) );
+            std::cerr << "ft = " << ft << "\n";
+            if (ft != "n") { 
+                ofile << printKey(vert) << "\tb\n";
+            }
+        }
+    }
+
+    ofile.close();
+
+}
+
+/*
 void viterbi( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, double penalty, const vector<size_t> &order, slnDictT &slnDict ) {
     auto N = H->order();
     size_t ctr = 0;
@@ -3469,10 +3725,7 @@ void viterbi( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, doubl
             for ( auto tn : edge.tail() ) {
                 auto cvert = H->vertex(tn);
                 w += slnDict[tn][0].cost;
-                /*std::set_union( slnDict[tn][0].flips.begin(), slnDict[tn][0].flips.end(),
-                                slnDict[tn][0].flips.begin(), slnDict[tn][0].flips.end(),
-                                std::inserter( flips, flips.begin() ) );
-                */
+
                 for ( auto & f : slnDict[tn][0].flips ) {
                     flips.insert(f);
                 }
@@ -3495,7 +3748,7 @@ void viterbi( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, doubl
     }
     cerr << "\n";
 }
-
+*/
 
 
 
@@ -3910,6 +4163,7 @@ template double MultiOpt::getCost( vector<vector<EagerCostClass>> &, const vecto
 template MultiOpt::BigInt MultiOpt::getCount( vector<vector<LazyCostClass>> &, const vector<size_t, StackAllocator<size_t>> &, const size_t &, unique_ptr<ForwardHypergraph> &);
 template MultiOpt::BigInt MultiOpt::getCount( vector<vector<EagerCostClass>> &, const vector<size_t, StackAllocator<size_t>> &, const size_t &, unique_ptr<ForwardHypergraph> &);
 
+
 template bool MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>( unique_ptr<ForwardHypergraph> &H,
         Utils::Trees::TreePtrT &t,
         Utils::TreeInfo &ti,
@@ -3922,6 +4176,15 @@ template bool MultiOpt::viterbiCountNew<CostClass<EdgeDerivInfoEager>>( unique_p
         const vector<size_t> &outputKeys,
         const double &beta );
 
+template bool MultiOpt::viterbi<CostClass<EdgeDerivInfoEager>>( 
+    unique_ptr<ForwardHypergraph> &H, 
+    TreePtrT &t, 
+    TreeInfo &ti, 
+    double penalty, 
+    const vector<size_t> &order, 
+    slnDictT &slnDict,
+    const string& outputName);
+
 template void MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(
     unique_ptr<ForwardHypergraph> &H,
     Model &model,
@@ -3930,3 +4193,4 @@ template void MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(
     slnDictT &slnDict,
     const string &outputName,
     const vector<size_t> &outputKeys );
+    

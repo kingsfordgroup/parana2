@@ -29,7 +29,7 @@ from ete2 import Phyloxml
 
 ScoredEdge = namedtuple('ScoredEdge', ['p1', 'p2', 'score'])
 
-extantName = "../../Parana2Data/HerpesPPIs/extant.adj"
+extantName = "../../Parana2Data/HerpesPPIs/extant_restricted.adj"
 #extantName = HerpesExtant.adj"
 
 temp = nx.read_adjlist(extantName)
@@ -121,7 +121,8 @@ def readScoreFile(fname, noself, randomize=False):
       p2 = toks[1].upper()
       s = float(toks[3])
       if inPotentialEdges(p1,p2):
-        #s = random.uniform(0.0,1.0)
+        if randomize: s = random.uniform(0.0,1.0)
+        #if p1 == p2: s = 0.0
         se = ScoredEdge(p1,p2,s)
         scoredEdges.append( se )
         nonEdgesWithProb.discard((p1,p2))
@@ -129,7 +130,8 @@ def readScoreFile(fname, noself, randomize=False):
 
   rev = True
   for u,v in (nonEdgesWithProb - set(nonPresentEdges)):
-    scoredEdges.append(ScoredEdge(u, v, 0.0))
+    s = random.uniform(0.0,1.0) if randomize else 0.0
+    scoredEdges.append(ScoredEdge(u, v, s))
   
   # cost = 0.0
   # for u,v in nonPresentEdges:
@@ -140,12 +142,12 @@ def readScoreFile(fname, noself, randomize=False):
 
   random.shuffle(scoredEdges)
   scoredEdges = list(enumerate(sorted( scoredEdges, key=lambda x: x.score, reverse=rev )))
-  print(len(scoredEdges))
-  print(t1,t2)
-  print("Target Edge = {0}".format(tedge))
-  print("Extant Edges = {0}".format(relevantExtantEdges))
-  print("Potential Edges = {0}".format(nonPresentEdges))
-  print("Scored Edges = {0}".format(scoredEdges))
+  # print(len(scoredEdges))
+  # print(t1,t2)
+  # print("Target Edge = {0}".format(tedge))
+  # print("Extant Edges = {0}".format(relevantExtantEdges))
+  # print("Potential Edges = {0}".format(nonPresentEdges))
+  # print("Scored Edges = {0}".format(scoredEdges))
 
   res = [ x for x in scoredEdges if isEdge(x[1], tedge[0], tedge[1])  ]
 
@@ -155,7 +157,7 @@ def readScoreFile(fname, noself, randomize=False):
     #print(res[0][0],float(len(nonPresentEdges)-1))
     #return (res[0][0], float(len(nonPresentEdges)-1))
     # New
-    print(res[0][0],float(len(scoredEdges)-1))
+    #print(res[0][0],float(len(scoredEdges)-1))
     return (res[0][0], float(len(scoredEdges)-1))
     
   else:
@@ -179,7 +181,7 @@ def pairwiseHeatMap(rankDict, orthoInds):
   #heatmap[:, ::-1], origin='lower', extent=extent, aspect=2, interpolation='nearest')
   pylab.clim(0,1.0)
   pylab.colorbar()
-  print(rankDict)
+  #print(rankDict)
   pylab.ylabel('Orthology Groups', labelpad=25)
   pylab.xlabel('Orthology Groups', labelpad=25)
   #pylab.hexbin(locs, counts, gridsize=20, cmap=CM.jet)
@@ -198,7 +200,7 @@ def heatMap( rankDict ):
   heatmap, xedges, yedges = np.histogram2d(locs, counts, bins=20)
   heatmap = np.rot90(heatmap,3)
   extent = [xedges[1], xedges[-1], yedges[1], yedges[-1]]# max(yedges)]
-  print(extent)
+  #print(extent)
   pylab.xticks([])
   pylab.imshow(heatmap[:, ::-1], origin='lower', extent=extent, aspect=2, interpolation='nearest')
   pylab.ylabel('Absolute Ranks')
@@ -227,7 +229,7 @@ def main():
 
   arguments = docopt(__doc__, version='ComputeRanks v1.0')
   relative = arguments['--relative']
-  print(arguments)
+  #print(arguments)
 
   params = { 'font.size' : 20,
              'lines.linewidth' : 3.0,
@@ -249,7 +251,7 @@ def main():
       for e in newGeneList:
         revOrthoDict[e] = orthoGroup
 
-  print(revOrthoDict)
+  #print(revOrthoDict)
 
   G = nx.read_adjlist(extantName)
   N = G.order()
@@ -305,6 +307,9 @@ def main():
   print("MEAN RELATIVE RANK = {0}".format(np.array(ranks).mean()))
   print("MEDIAN RELATIVE RANK = {0}".format(np.median(ranks)))
 
+  with open(arguments['-o'], 'wa') as ofile:
+    ofile.write('{0}\t{1}\n'.format(np.array(ranks).mean(), np.median(ranks)))
+
   if arguments['heatmap']:
     pairwiseHeatMap(rankDict, orthoInds)
 
@@ -353,8 +358,7 @@ def main():
   ax = pylab.gca()
   #ax.title.set_y(1.05)
   #pylab.tight_layout()
-  pylab.savefig(arguments['-o'])
-
+  #pylab.savefig(arguments['-o']) 
   #heatMap(rankDict)
 
 

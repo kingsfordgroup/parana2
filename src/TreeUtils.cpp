@@ -77,7 +77,8 @@ namespace Utils {
             newInds[i]++;
             if ( newInds[i] < sizes[i] ) {
                 // Custom fix -- check to see if Boost folks fix emplace operation
-                pq.emplace( computeScore(eid, newInds), eid, newInds );
+                // pq.emplace( computeScore(eid, newInds), eid, newInds );
+                pq.emplace( MultiOpt::EdgeDerivation(computeScore(eid, newInds), eid, newInds) );
             }
             if (inds[i] != 0) { return true; }
             i += 1;

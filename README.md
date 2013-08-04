@@ -1,11 +1,17 @@
 Parana 2 (Reviewer Pre-release) 
 ===============================
 
-This software accompanies ISMB 2013 submission 217 
+>  **<font color=red>Note</font>**: We're currently working migrating this project to 
+Github and working on an easier-to-compile release which should be available shortly.
 
-> "Predicting protein interactions via parsimonious ancestral network reconstruction" 
+----------------
+
+This software accompanies ISMB 2013 publication
+
+> "Predicting protein interactions via parsimonious network history inference"
 
 and is for **reviewer purposes only**.  It should not currently be redistributed.
+An initial release is forthcoming.
 
 Data
 ----

@@ -1,12 +1,13 @@
 """AnalyzePredictions
 
 Usage:
-  AnalyzePredictions.py --gtruth=<gtdir> --other=<odir> --parana=<pfile>
+  AnalyzePredictions.py --gtruth=<gtdir> --other=<odir> --parana=<pfile> [-d]
 
 Options:
   -g, --gtruth=<gtdir>     The directory containing the ground truth networks.
   -o, --other=<odir>       The directory containing the predictions of the other method.
   -p, --parana=<pfile>     The PARANA output file.
+  -d                       The "other" method has no probabilities (e.g. Parana1)
 """
 from docopt import docopt
 
@@ -239,16 +240,25 @@ def main(options):
     with a cutoff of 0.5.  This ensures we keep all of the nodes, even if they have no
     incident edges
     """
-    gtGraphs = { fn.split("/")[-1][:-5] : \
+    gtGraphs = { fn.split("/")[-1].split('.')[0] : \
                  filterGraphWithCutoff(nx.read_weighted_edgelist(fn)) for fn in gtGraphNames }
+                 #nx.read_edgelist(fn) for fn in gtGraphNames }
 
     """
     The graphs that are the output of the other program (in this case Pinney et al.).
     They have the same name as the ground truth files above except '.prob' is replaced
     with '.out.ppi'.
     """
+    readother = lambda x: nx.read_adjlist(x, create_using=nx.Graph()) if options['-d'] else nx.read_weighted_edgelist(x)
     oGraphNames = [ "{0}/{1}.out.ppi".format(other, k) for k in gtGraphs.keys() ]
-    oGraphs = { fn.split("/")[-1][:-8] : nx.read_weighted_edgelist(fn) for fn in oGraphNames }
+    oGraphs = { fn.split("/")[-1][:-8] : readother(fn) for fn in oGraphNames }
+
+    print oGraphs
+    if options['-d']:
+        for g in oGraphs.values():
+            print(g.order(),g.size())
+            for u,v,d in g.edges(data=True):
+                d['weight'] = 1.0
 
     inputGraph = nx.read_adjlist('../../Parana2Data/bZIPData/input/bZIP_n0.adj')
 
@@ -276,11 +286,25 @@ def main(options):
         
         # Find the best cutoff for the parana graph rather than 
         # using the heuristic above
-        c1, bf1 = getOptimalCutoff( oGraphs[gtName], gtGraph )      
+        if options['-d']:
+            c1 = 0.5
+        else:
+            c1, bf1 = getOptimalCutoff( oGraphs[gtName], gtGraph )
         c, bf1 = getOptimalCutoff( paranaGraph, gtGraph )      
         #print("optimal cutoff is {0}".format(c))
         #c = 0.05
         #c  = 0.03
+
+
+        f1 = "pinney_{0}.adj".format(gtName)        
+        f2 = "parana_{0}.adj".format(gtName)
+
+        ping = filterGraphWithCutoff(oGraphs[gtName].subgraph(gtGraph.nodes()), c1)
+        parg = filterGraphWithCutoff(pGraph.subgraph(gtGraph.nodes()), c)
+        
+        nx.write_adjlist(ping, f1)
+        nx.write_adjlist(parg, f2)
+
 
         specString = "Species : {0}".format(gtName)
         print("{:=^80}".format(specString))
@@ -288,7 +312,8 @@ def main(options):
         (otherPerf, otherROC) = getPerformanceAtCutoff( oGraphs[gtName], gtGraph, c1 ) #0.5 )
         (paranaPerf, paranaROC) = getPerformanceAtCutoff( pGraph, gtGraph, c )
         
-        printPerf("Pinney et al.", otherPerf, otherROC)
+        ostring = "Parana 1.0" if options['-d'] else "Pinney et al."
+        printPerf(ostring, otherPerf, otherROC)
         printPerf("Parana 2.0", paranaPerf, paranaROC)
 
         # Old evaluation code

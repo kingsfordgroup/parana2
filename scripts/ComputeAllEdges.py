@@ -6,7 +6,7 @@ Options:
 --recdir=<r>  Folder containing reconciled trees
 --outdir=<o>  Folder to which results should be written
 --ortho=<o>   Orthogy group file
---beta=<b>    Beta for Parana method [default: 60.0]
+--beta=<b>    Beta for Parana method [default: 80.0]
 """
 from docopt import docopt
 import os
@@ -27,7 +27,7 @@ from lxml import etree as ET
 
 sys.path.append("../../rws")
 
-extantName = "../../Parana2Data/HerpesPPIs/extant.adj"
+extantName = "../../Parana2Data/HerpesPPIs/extant_restricted.adj"
 
 def mkdir_p(path):
   try:
@@ -41,11 +41,11 @@ def iterWithSelf(groups):
     return itertools.chain(itertools.combinations(groups,2), [(g,g) for g in groups])
 
 def constructParanaCall(gfile, ofilename, beta, og1, og2, t1name, t2name):
-  parana = "../bin/parana2"
+  parana = "../build/bin/parana2"
   callargs = [parana, "-t {0}".format(gfile.name), \
   "pars", \
   "-u", "-o", ofilename,\
-  "-k", "200", "-r", "1.0","-p", "5.0", "-b", beta]
+  "-k", "40", "-r", "1.2","-p", "1.0", "-b", str(beta)]
 
   # Add the first orthology group
   callargs += ["-d", t1name]
@@ -56,21 +56,20 @@ def constructParanaCall(gfile, ofilename, beta, og1, og2, t1name, t2name):
 
   return callargs
 
-def runRWS(G, redge, ofilename):
+def runRWS(G, ofilename):
   import rwsPredict
-  
   vertToInd = { v:i for i,v in enumerate(G.nodes()) }
   A = np.array(nx.adjacency_matrix(G))
 
-  A -= np.diag(np.diag(A))
-  A += np.eye(A.shape[0])
+  #A -= np.diag(np.diag(A))
+  #A += np.eye(A.shape[0])
 
-  u = vertToInd[redge[0]]
-  v = vertToInd[redge[1]]
-  A[u][v] = 0.0
-  A[v][u] = 0.0
+  # u = vertToInd[redge[0]]
+  # v = vertToInd[redge[1]]
+  # A[u][v] = 0.0
+  # A[v][u] = 0.0
 
-  G2 = rwsPredict.corrGraph(G, A)
+  G2 = rwsPredict.corrGraph(G, A, filterSelf=False)
   with open(ofilename,'wb') as ofile:
     rwsPredict.writeInParanaFormat(G2, ofile)
 
@@ -106,7 +105,7 @@ def main(args):
   if outputCVFile:
     root = ET.Element("cvtest", name="herpes_loocv")
     
-
+  ctr = 0
   orthoGroups = odict.keys()
   progress = ProgressBar(len(orthoGroups)*len(orthoGroups)).start()
   for i, (og1, og2) in enumerate(iterWithSelf(orthoGroups)):
@@ -135,12 +134,14 @@ def main(args):
                 os.system(" ".join(callargs)+"> /dev/null 2>&1")
             elif usingRWS:
               copy = alist.copy()
-              #copy.remove_edge(e[0],e[1])
-              runRWS(copy, e, ofileName)
+              copy.remove_edge(e[0],e[1])
+              #print(cGraph.size())
+              runRWS(copy, ofileName)
             elif outputCVFile:
-              tset = ET.SubElement(root, "testset", name="fold_{0}".format(i))
+              tset = ET.SubElement(root, "testset", name="fold_{0}".format(ctr))
               u,v = sorted((e[0],e[1]))
               ET.SubElement(tset, "edge", u=u, v=v)      
+              ctr += 1
             else:
               raise "Method must be one of {Parana|RWS}"
 

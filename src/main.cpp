@@ -132,6 +132,8 @@ void printHelpUsage( ArgParser &ap,
 int main( int argc, char **argv ) {
     // initialize the logger
     cpplog::FileLogger log( "log.txt"  );
+    // stderr logger
+    cpplog::StdErrLogger slog;
 
     // The options to choose the method (parsimony | probabilistic)
     po::positional_options_description p;
@@ -159,10 +161,11 @@ int main( int argc, char **argv ) {
     po::options_description parsimony("Parsimony Specific Options");
     parsimony.add_options()
     ("del", po::value< double >()->default_value(1.0), "deletion cost")
-    ("ratio,r", po::value< double >()->default_value(1.0), "ratio of creation to deletion cost")
+    ("ratio,r", po::value< double >()->default_value(1.2), "ratio of creation to deletion cost")
     ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
-    ("numOpt,k", po::value< size_t>()->default_value(10), "number of near-optimal score classes to use")
-    ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
+    ("numOpt,k", po::value< size_t>()->default_value(40), "number of near-optimal score classes to use")
+    ("timePenalty,p", po::value< double >()->default_value(1.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
+    ("single,s", po::value<bool>()->zero_tokens(), "compute a single optimal set of flips (i.e. \"Parana 1\")")
     ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
     ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm")
     ;
@@ -195,11 +198,11 @@ int main( int argc, char **argv ) {
         vector<string> treeNames = ap["dupHist"].as< vector<string> >();
         // We can't have more than 2
         if ( treeNames.size() > 2 ) {
-            cerr << "only 1 or 2 duplication histories can be provided; you provided " + treeNames.size() << "\n";
+            LOG_INFO(slog) << "only 1 or 2 duplication histories can be provided; you provided " + treeNames.size() << "\n";
             abort();
         } else {
             for ( const auto & tn : treeNames ) {
-                cerr << "Input tree : " << tn << "\n";
+                LOG_INFO(slog) << "Input tree : " << tn << "\n";
             }
         }
 
@@ -290,15 +293,15 @@ int main( int argc, char **argv ) {
             auto rId = tree->getRootId();
 
             vector<size_t> keyList;
-            /*
             if ( treeNames.size() > 1 ) {
 
                 auto r1 = tree->getSonsId(rId)[0];
                 auto r2 = tree->getSonsId(rId)[1];
 
-                keyList.push_back( FlipKey(r1, r2, true, true) );
+                keyList.push_back(r1);
+                keyList.push_back(r2);
             }
-            */
+            
            
             tinfo.extantInterval[ rId ] = Utils::ExistenceInterval( -std::numeric_limits<double>::infinity(), 0.0 );
             Utils::Trees::prepareTree( tree, tinfo, rId );
@@ -362,14 +365,17 @@ int main( int argc, char **argv ) {
                 G = undirectedGraphT();
                 auto &UG = get<undirectedGraphT>(G);
 
+                std::cerr << "reading graph ... ";
                 if ( isAdjList ) { // The target graph is unweighted (binary)
                     GraphUtils::readFromAdjacencyList( graphName, UG );
                 } else { // The target graph has edge weights
                     GraphUtils::readFromMultilineAdjacencyList(graphName, UG );
                 }
+                std::cerr << "done\n";
 
                 // Augment the graph nodes with the correpsonding
                 // node ids from the phylogeny
+                std::cerr << "augmenting graph ... ";
                 auto vp = boost::vertices(UG);
                 unordered_set<int> leavesCovered;
                 for ( auto it = vp.first; it != vp.second; ++it ) {
@@ -377,7 +383,7 @@ int main( int argc, char **argv ) {
                     UG[*it].idx = lid;
                     leavesCovered.insert(lid);
                 }
-
+                std::cerr << "done\n";
                 if ( leavesCovered.size() != boost::num_vertices(UG) ) {
                     std::cerr << "I added " << leavesCovered.size() << " IDs to the graph, but "
                               << "there were " << boost::num_vertices(UG) << " graph nodes.\n";
@@ -469,7 +475,9 @@ int main( int argc, char **argv ) {
                 
                     auto beta =  ap["beta"].as<double>();
 
-                    if (ap.isPresent("lazy")) {
+                    if (ap.isPresent("single")) {
+                        MultiOpt::viterbi<CostClass<EdgeDerivInfoEager>>(H, tree, tinfo, penalty, order, slnDict, outputFileName);
+                    } else if (ap.isPresent("lazy")) {
                         // lazy
                         auto derivs = MultiOpt::initKBest( H, order, slnDict );
                         std::vector<size_t> edges = MultiOpt::viterbiPass(H, derivs, order);

@@ -349,7 +349,8 @@ namespace MultiOpt {
                           slnDictT& slnDict, countDictT& countDict, const size_t& k,
                           const string& outputName, const vector<size_t>& outputKeys, const double& beta );
 
-    void viterbi( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict );
+    template <typename CostClassT>
+    bool viterbi( unique_ptr<ForwardHypergraph>& H, TreePtrT& t, TreeInfo& ti, double penalty, const vector<size_t>& order, slnDictT& slnDict, const string& outputName );
 
     /** Alg 3 from the paper */
     typedef std::pair<size_t, Derivation> TaggedDerivT;
