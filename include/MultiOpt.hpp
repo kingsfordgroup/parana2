@@ -276,7 +276,7 @@ namespace MultiOpt {
     void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, TreeInfo& ti, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
 
     template< typename GT >
-    void MLLeafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
+    void MLLeafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, TreeInfo& ti, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
 
     template <typename CostClassT>
     tuple<double, BigInt> getCostCount( vector<vector<CostClassT>>& tkd,

@@ -338,50 +338,42 @@ double existencePenalty( const TreeInfo &ti, const T &vert, double penalty, doub
 }
 
 
-unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
+
+/* =============== BEGIN MAXIMUM LIKELIHOOD ================== */
+
+
+/** \brief Builds the hypergraph that encodes the appropriate recurrence relations for the ML formulation
+* 
+*  Given the phylogenetic tree and the evolution model, this function returns a pointer to a hypergraph
+*  encoding the appropriate relationships between edges.
+*/
+unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( 
+        const TreePtrT &t,
         const TreeInfo &ti,
         Model &model,
         bool directed ) {
 
     cpplog::FileLogger log( "log.txt", true );
 
-    boost::timer::auto_cpu_timer timer;
+    boost::timer::auto_cpu_timer timer("Building (ML) Hypergraph [%ws wall, %us user + %ss system = %ts CPU (%p%)]\n");
 
+    // Is the node nid a leaf node in the phylogeny?
     auto isLeaf = [&]( const int & nid ) -> bool { return t->isLeaf(nid); };
+    // Is the node nid an internal node in the phylogeny?
     auto isInternal = [&]( const int & nid ) -> bool { return !t->isLeaf(nid); };
+
     //auto isLost = [&]( int nid ) -> bool { return (t->getNodeName(nid)).find("LOST") != std::string::npos; };
     auto isLost = [&]( int nid ) -> bool { return false; };
 
 
-    auto vstr = [&]( const FlipKey & vert ) -> string {
-        auto uname = t->getNodeName(vert.u());
-        auto vname = t->getNodeName(vert.v());
-        if (uname > vname) {
-            auto tmp = vname;
-            vname = uname;
-            uname = tmp;
-        }
-
-        string fstr = "";
-        if ( vert.state() == FlipState::both ) {
-            fstr = "<-->";
-        } else if ( vert.state() == FlipState::none ) {
-            fstr = "X";
-        } else {
-            std::abort();
-        }
-        return "[" + uname + ", " + vname + "] : " + fstr;
-    };
-
-
     /**
-    * Determines if the transition from the key parent to the key child is valid.
+    * Determines if the transition from the key **parent** to the key **child** is valid.
     * Any transition in which the state of the interaction is not altered (not flipped) between the 
     * parent and child is valid.  If the state of the interaction is flipped, the transition is only
     * valid if the interacting nodes ( (u,v) in the parent ) exist in the same species.
     */
     auto isValidTransition = [&]( const FlipKey& parent, const FlipKey& child ) -> bool {
-        return true;
+
         if ( parent.state() == FlipState::none and (parent.state() != child.state()) ) {
             auto us = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.u(),"S") )->toSTL();
             auto vs = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.v(),"S") )->toSTL();
@@ -398,7 +390,7 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
 
     unique_ptr<ForwardHypergraph> slnSpaceGraph( new ForwardHypergraph() );
 
-    auto addIncomingHyperedge = [ = , &slnSpaceGraph, &t] (const FlipKey & k ) {
+    auto addIncomingHyperedge = [ = , &slnSpaceGraph, &t] (const FlipKey & k ) -> void {
         typedef std::vector<FlipKey> FlipKeyVec;
 
         auto addCartesianProduct = [&] ( 
@@ -423,8 +415,8 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
                 double w = 1.0;
                 if ( isValidEdge and acceptEdge(res) ) { 
                     // Print the hyperedge
-                    // std::cerr << "Added hyperedge " << vstr(k) << " => ";
-                    // for ( auto tk : res ){ std::cerr << vstr(tk) << ", ";}
+                    // std::cerr << "Added hyperedge " << Utils::stringForKey(k, t) << " => ";
+                    // for ( auto tk : res ){ std::cerr << Utils::stringForKey(tk, t) << ", ";}
                     // std::cerr << "\n";
                     slnSpaceGraph->addEdge( res, k, w );
                 }
@@ -500,13 +492,13 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
                 */
                 std::vector< FlipKeyVec > iterKeys;
                 std::vector<FlipKey> none;
-                if ( !isLost(LU) ) {
+                if (!isLost(LU)) {
                     iterKeys.push_back( {{LU, LU, FlipState::both},{LU, LU, FlipState::none}} );
                 }
-                if ( !isLost(RU) ) {
+                if (!isLost(RU)) {
                     iterKeys.push_back( {{RU, RU, FlipState::both},{RU, RU, FlipState::none}} );
                 }
-                if ( not differentExtantNetworks(ti, LU, RU) and ! (isLost(LU) or isLost(RU)) ) {
+                if (not differentExtantNetworks(ti, LU, RU) and !(isLost(LU) or isLost(RU))) {
                     iterKeys.push_back( {{LU, RU, FlipState::both},{LU, RU, FlipState::none}} );
                 }
                 addCartesianProduct(iterKeys, none, edgeAlwaysOk);
@@ -525,15 +517,15 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
             *       F          T
             *       F          F
             */
-            if ( isInternal(U) ) {
+            if (isInternal(U)) {
                 if ( LU > RU ) { std::swap(LU, RU); }
 
-                if ( not differentExtantNetworks(ti, LU, V) && !(isLost(LU) || isLost(V)) ) {
+                if (not differentExtantNetworks(ti, LU, V) && !(isLost(LU) || isLost(V))) {
                     iterKeys.push_back( {FlipKey(LU, V, FlipState::both), 
                                            FlipKey(LU, V, FlipState::none)} ); 
                 }
 
-                if ( not differentExtantNetworks(ti, RU, V) && !(isLost(RU) || isLost(V)) ) {
+                if ( not differentExtantNetworks(ti, RU, V) && !(isLost(RU) || isLost(V))) {
                     iterKeys.push_back( {FlipKey(RU, V, FlipState::both), 
                                            FlipKey(RU, V, FlipState::none)} ); 
                 }
@@ -554,12 +546,12 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
             if ( isInternal(V) ) {
                 if ( LV > RV ) { std::swap(LV, RV); }
 
-                if ( not differentExtantNetworks(ti, LV, U) && !(isLost(LV) || isLost(U)) ) {
+                if (not differentExtantNetworks(ti, LV, U) && !(isLost(LV) || isLost(U))) {
                     iterKeys.push_back( {FlipKey(U, LV, FlipState::both),
                                            FlipKey(U, LV, FlipState::none)});
                 }
 
-                if ( not differentExtantNetworks(ti, RV, U) && !(isLost(RV) || isLost(U)) ) {
+                if (not differentExtantNetworks(ti, RV, U) && !(isLost(RV) || isLost(U))) {
                     iterKeys.push_back( {FlipKey(U, RV, FlipState::both),
                                         FlipKey(U, RV, FlipState::none)});
                 }
@@ -593,6 +585,8 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
                  !(ti.inSubnodesOf(u, v) ||  ti.inSubnodesOf(v, u)) && // neither is a progeny of the other
                  !(isLost(u) || isLost(v)) )) { // neither of them is lost
                 
+                //if (ti.intervalDistance(u, v) > 0.0) { continue; }
+
                 // Add a vertex representing no edge between them
                 slnSpaceGraph->addVertex( FlipKey( u, v, FlipState::none ) );
                 if ( ! t->isRoot(v) ) {
@@ -624,6 +618,458 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph( const TreePtrT &t,
     LOG_INFO(log) << "Hypergraph size = " << slnSpaceGraph->size() << "\n";
     return slnSpaceGraph;
 }
+
+
+template< typename GT >
+void MLLeafCostDict( 
+    unique_ptr<ForwardHypergraph> &H, 
+    TreePtrT &T, 
+    TreeInfo &ti,
+    GT &G, 
+    bool directed, 
+    double cc, 
+    double dc, 
+    slnDictT &slnDict 
+    ) {
+    /*
+      Given the duplication tree T, the root vertex rv, the extant graph G and
+      the constraints, fill in the values for the leaf nodes of the hypergraph
+    */
+    typedef typename boost::graph_traits< GT >::edge_descriptor EdgeT;
+    boost::timer::auto_cpu_timer timer;
+    auto undirected = !directed;
+    auto isLost = [&]( int nid ) -> bool { return (T->getNodeName(nid)).find("LOST") != std::string::npos; };
+    auto isLeaf = [&]( int nid ) -> bool { return  T->isLeaf(nid); };
+
+    auto none = FlipState::none;
+    auto fw = FlipState::forward;
+    auto rev = FlipState::reverse;
+    auto both = FlipState::both;
+
+    auto costDict = getCostDict(cc, dc, directed);
+    auto selfLoopCostDict = getSelfLoopCostDict(cc, dc, directed);
+    auto costFunDict = getCostFunDict(cc, dc, directed);
+    auto selfLoopCostFunDict = getSelfLoopCostFunDict(cc, dc, directed );
+
+    auto N = H->order();
+    auto M = H->size();
+
+    // The list of all hypernodes with no descendants
+    // We'll have either N^2 or (N^2)/2 leaf hypernodes (depending
+    // on directedness)
+    auto numExtantNodes = std::distance( vertices(G).first, vertices(G).second );
+    auto numConn = ( numExtantNodes * (numExtantNodes-1) ) / 2;
+    // If it's directed, edges can go both ways
+    if (directed) {
+        numConn *= 2;
+    }
+    // Self loops only get counted once
+    numConn += numExtantNodes;
+
+    vector<size_t> leafHypernodes;
+    leafHypernodes.reserve(numConn);
+
+    // For every hypernode, it's a leaf <=> it has no incoming edges
+    for ( size_t i = 0; i < N; ++i) {
+        auto elist = H->incident(i);
+        if ( elist.size() == 0 ) {
+            leafHypernodes.push_back(i);
+        }
+    }
+
+    std::cerr << "# of extant proteins (N): " << numExtantNodes << ", N^2 / 2: " << numConn << ", # leaf hypernodes: " << leafHypernodes.size() << "\n";
+
+    typedef typename GT::vertex_descriptor NodeT;
+    typedef unordered_set<NodeT> NodeSetT;
+
+    // Is the node e contained in the set s?
+    auto contains = [] ( const NodeSetT & s, NodeT e ) { return s.find(e) != s.end(); };
+
+    NodeSetT extantNodes;
+
+    Google<int>::Set leafIds;
+    leafIds.set_empty_key(-1);
+
+    for ( auto l : T->getLeavesId() ) { leafIds.insert(l); }
+
+    auto vp = boost::vertices(G);
+    for ( auto it = vp.first; it != vp.second; ++it ) {
+        auto v = *it;
+        auto idx = G[v].idx;
+        // found this node's id in the set of extant vertices
+        if ( leafIds.find(idx) != leafIds.end() ) {
+            extantNodes.insert(v);
+        }
+    }
+
+    // Map from tree node ID to graph vertex ID
+    unordered_map<int, NodeT> idToVertMap;
+    for ( auto v = boost::vertices(G).first; v != boost::vertices(G).second; ++ v ) {
+        idToVertMap[ G[*v].idx ] = *v;
+    }
+    //cerr << "ID TO VERTEX MAP SIZE = " << idToVertMap.size() << "\n";
+    size_t nlost = 0;
+    size_t nef = 0;
+    double tweight = 0.0;
+
+    // For every leaf hypernode
+    for ( auto n : leafHypernodes ) {
+        auto nd = H->vertex(n);
+
+        auto nameU = T->getNodeName(nd.u());
+        auto nameV = T->getNodeName(nd.v());
+
+        auto uIsLeaf = isLeaf(nd.u());
+        auto vIsLeaf = isLeaf(nd.v());
+    
+        // Debug checks
+        /*
+        if (not (uIsLeaf or vIsLeaf)) {
+            std::cerr << "in the node: " << Utils::stringForKey(H->vertex(n), T) << "\n";
+            if (not uIsLeaf) {
+                std::cerr << nameU << " is not a leaf; ";
+            }
+            if (not vIsLeaf) {
+                std::cerr << nameV << " is not a leaf; ";                
+            }
+            std::cerr << "\n";
+        }
+
+        if ( differentExtantNetworks(ti, nd.u(), nd.v()) ) {
+            std::cerr << "skipping " << Utils::stringForKey(H->vertex(n), T) << "\n";
+            continue;
+        }
+        */
+   
+        // Check to see if u, v, or both have been lost
+        auto endOfMap = idToVertMap.end();
+        bool lostU = ( idToVertMap.find( nd.u() ) == endOfMap ) || ( ! contains(extantNodes, idToVertMap[nd.u()]) );
+        bool lostV = ( idToVertMap.find( nd.v() ) == endOfMap ) || ( ! contains(extantNodes, idToVertMap[nd.v()]) );
+
+        /*
+        if ( !( isLeaf(nd.u()) and isLeaf(nd.v()) ) ) {
+            std::cerr << nameU << ", " << nameV << ", cost = 0.5\n";
+            //std::abort();
+            auto cost = 0.5;
+            vector<size_t> ev;
+            Google<Derivation::flipT>::Set es;
+            es.set_empty_key( make_tuple(-1, -1, ""));
+            nlost += 1;
+            slnDict[n] = { {0, Derivation(cost, n, ev, es)} };
+        }*/
+
+        // The cost to / between lost nodes is always 0
+        if ( lostU || lostV ) {
+            //double lostCost = ( nd.state() == FlipState::none ) ? 0.91 : 0.09;
+            auto lostCost = 0.5;
+            vector<size_t> ev;
+            Google<Derivation::flipT>::Set es;
+            es.set_empty_key( make_tuple(-1, -1, ""));
+            nlost += 1;
+            slnDict[n] = { {0, Derivation(lostCost, n, ev, es)} };
+        } else {
+            // Otherwise, u and v both exist in the extant
+            // network, so get the appropriate info
+            auto u = idToVertMap[nd.u()];
+            auto v = idToVertMap[nd.v()];
+            auto f = nd.f();
+            auto r = nd.r();
+
+            if (u != v) {
+                EdgeT fedge, redge;
+                bool d_f, d_r;
+                tie(fedge, d_f) = edge(u, v, G);
+                double w_f = d_f ? G[fedge].weight : 0.0;
+                tie(redge, d_r) = edge(v, u, G);
+                double w_r = d_r ? G[redge].weight : 0.0;
+                if ( undirected ) {
+                    assert( w_f == w_r );
+                }
+                auto cost = (d_f == nd.f() and d_r == nd.r()) ? 1.0 : 0.0;
+                Google<Derivation::flipT>::Set effectiveEdges;
+                effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
+                vector<size_t> ev;
+                slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges)} };
+
+            } else {
+                EdgeT e;
+                bool hasSelfLoop;
+                tie(e, hasSelfLoop) = edge(u, v, G);
+                double w_l = hasSelfLoop ? G[e].weight : 0.0;
+
+                auto cost = ( nd.f() == hasSelfLoop ) ? 1.0 : 0.0;
+                Google<Derivation::flipT>::Set effectiveEdges;
+                effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
+                vector<size_t> ev;
+                slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges)} };
+
+            } // ( u != v )
+        } // ( lostU || lostV )
+    } // loop over leaf hypernodes
+}
+
+
+double computeVertexProbability(const size_t &vid,
+                                const TreePtrT& t,
+                                const std::vector<double> &probs,
+                                const boost::dynamic_bitset<> &normed,
+                                unique_ptr<ForwardHypergraph> &H,
+                                Model &model) {
+
+    /**
+    * Determines if the transition from the key parent to the key child is valid.
+    * Any transition in which the state of the interaction is not altered (not flipped) between the 
+    * parent and child is valid.  If the state of the interaction is flipped, the transition is only
+    * valid if the interacting nodes ( (u,v) in the parent ) exist in the same species.
+    */
+    auto isValidTransition = [&]( const FlipKey& parent, const FlipKey& child ) -> bool {
+        if ( (parent.state() != child.state()) ) {
+            auto us = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.u(),"S") )->toSTL();
+            auto vs = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.v(),"S") )->toSTL();
+            return us == vs;
+        } 
+        return true;        
+    };
+
+    auto incomingEdges = H->incident(vid);
+    // We already know the probability of all of the leaves
+    if ( incomingEdges.size() == 0 ) { return probs[vid]; }
+
+    auto parentVertex = H->vertex(vid);
+    double prob = 0.0;
+    size_t k = 0;
+
+    // For each edge incident to this vertex
+    for (auto & eid : incomingEdges) {
+        auto edge = H->edge(eid);
+
+        // probability of the tail vertices
+        double tprob = 1.0;
+        size_t i = 0;
+
+        // For every tail vertex of this hyperedge
+        for (auto tid : edge.tail()) {
+            auto childVertex = H->vertex(tid);
+            //assert( normed[tid] );
+
+            auto transProb = probs[tid] * model.transitionProbability( childVertex, parentVertex );
+            tprob *= transProb;
+        }
+
+        prob += tprob;
+    }
+
+    return prob;
+
+}
+
+template <typename CostClassT>
+void probabilistic( unique_ptr<ForwardHypergraph> &H,
+                    Model &model,
+                    TreePtrT &t,
+                    const vector<size_t> &order,
+                    slnDictT &slnDict,
+                    const string &outputName,
+                    const vector<size_t> &outputKeys ) {
+
+    // Compute the *weighted* probability of each edge being in
+    // the top k distinct scoring solutions
+    cpplog::FileLogger log( "log.txt", true );
+
+    size_t maxID = *(std::max_element(order.begin(), order.end()));
+
+    // Dictionary that holds the top-k cost classes for each
+    // vertex, as well as other relevant information
+    vector< vector<CostClassT> > tkd(maxID + 1, vector<CostClassT>() ); //unordered_map< size_t, vector<CostClass> > tkd;
+
+    /**
+    * Dictionary that holds the probability of each state for each vertex
+    */
+    typedef double LogProbT;
+    vector< LogProbT > probs( maxID + 1, 0.0 );
+    // true for each vertex whose probability has been normalized, false for all others
+    boost::dynamic_bitset<> normed( maxID + 1 );
+
+    double costsum = 0.0;
+
+    // Each leaf has a single solution which is, by definition, of optimal cost
+    for ( const auto & vit : order ) {
+        if ( H->isLeaf(vit) ) {
+            probs[vit] = slnDict[vit][0].cost;
+            normed[vit] = 1;
+        }
+    }
+
+    typedef size_t edgeIdT;
+    auto N = order.size();
+    size_t ctr = 0;
+    ProgressDisplay showProgress(order.size());
+
+    auto allNodesInvolving = [&] ( int u, int v ) -> std::vector<size_t> {
+        std::vector<FlipState> fr = { FlipState::none, FlipState::both };
+        std::vector<MustConnect> cucv = { MustConnect::none, MustConnect::left, MustConnect::right, MustConnect::both };
+        std::vector< size_t > keys;
+
+        for ( auto& dir : fr ) { // for all flip states
+            for ( auto& cstate : cucv ) { // for all connect states
+                FlipKey k(u, v, dir, cstate);
+                if ( H->contains( k ) ) {
+                    keys.push_back( H->index(k) );
+                }
+            }
+        }
+        return keys;
+    };
+
+    // For each vertex, in topological order (up)
+    for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr, ++showProgress ) {
+
+        /*
+         for ( auto e : H->incident(*vit) ) {
+            auto edge = H->edge(e);
+            for ( auto v : edge.tail() ) {
+               auto key = H->vertex(v);
+               
+               auto opKey = flipBoth(key);
+               auto opInd = H->index(opKey);
+               
+               if ( !H->isLeaf(v) ) {
+
+                auto states = {v, opInd};
+                double probSum = 0.0;
+                for ( auto s : states ) { probSum += probs[s]; }                
+                if ( ! (probSum > 0) ) {
+                    for ( auto s : states ) {
+                        if ( H->incident( opInd ).size() > 0 ) {
+                            std::cerr << "P("; printWithNames( s ); std::cerr << ") = " << probs[s] << "\n";
+                        }
+                    }
+                    //std::abort();
+                 }
+                 if ( probSum > 0 ) {
+                    for ( auto s : states ){ 
+                        probs[s] /= probSum;
+                    }
+                    //probs[v] /= probSum;
+                    //probs[opInd] /= probSum;
+                    //assert( probs[v] + probs[opInd] > 0.99 && probs[v] + probs[opInd] < 1.01 );
+                    auto tmpSum = 0.0;
+                    for ( auto s : states ) { tmpSum += probs[s]; }
+                    assert( tmpSum > 0.99 && tmpSum < 1.01 );
+                    
+                 }
+                 //normed[v] = true; normed[opInd] = true;
+                 for ( auto s : states ) { normed[s] = 1; }
+               }
+           }
+        } 
+        */
+       
+        auto vert = H->vertex(*vit);
+        auto probVert = computeVertexProbability(*vit, t, probs, normed, H, model);
+        probs[ *vit ] = probVert;
+
+    } // loop over verts
+
+    typedef Google< size_t, double >::Map probMapT;
+    size_t invalidIdx = std::numeric_limits<size_t>::max();
+    probMapT probMap;
+    probMapT outProbMap;
+    probMap.set_empty_key( invalidIdx );
+    outProbMap.set_empty_key( invalidIdx );
+
+    // Map from a vertex to the maximum cost class that is
+    // considered in deriving any solution that is actually used.
+    FlipKey rootKey( t->getRootId(), t->getRootId(), FlipState::none );
+    auto rootInd = H->index(rootKey);
+
+    ctr = 0;
+    size_t tot = order.size();
+    auto rootFlip = flipBoth(rootKey);
+    H->addVertex( rootFlip );
+    auto rootIdNoFlip = H->index(rootKey);
+    auto rootIdFlip = H->index(rootFlip);
+
+    cerr << "Down phase\n";
+    showProgress.restart(order.size());
+
+    std::vector<LogProbT> outProbs( probs.size(), 0.0 );
+
+    // Compute the probabilities (down)
+    // Loop over all vertices in *reverse* topological order
+    for ( auto vit = order.rbegin(); vit != order.rend(); ++vit, ++ctr, ++showProgress ) {
+        if( !normed[*vit] ) {
+            auto k = H->vertex(*vit);
+            /*
+            std::cerr << "key ";
+            printWithNames(*vit);
+            std::cerr << " is not normed!!\n";
+            std::abort();
+            */
+        }
+        /*
+        // for all incoming edges contributing to this cost class
+        for ( const auto & e : H->incident(*vit) ) {
+          // What is the action along edge 'e' (i.e. how is
+          // the state of the interaction function different
+          // between *vit and the tail nodes of e)
+          auto tail = H->edge(e).tail();
+          auto ft = flipType( H->vertex(*vit), H->vertex(tail[0]) );
+          auto outKey = keyForAction( H->vertex(*vit), ft );
+          auto outInd = H->index(outKey);
+          outProbs[outInd] += probs[*vit];
+        }
+        */
+    }
+
+    bool restrictOutput = false;
+    std::vector<size_t> outputInds;
+    if ( outputKeys.size() > 0 ) {
+        restrictOutput = true;
+        outputInds = outputKeys;
+    } else {
+        outputInds.resize(order.size(), 0);
+        std::iota(outputInds.begin(), outputInds.end(), 0);
+    }
+
+
+    //bool restrictOutput = false;
+    string fname = outputName;
+    std::fstream output( fname, std::fstream::out | std::fstream::trunc );
+
+    //for ( size_t vid = 0; vid < H->order(); ++vid ) { // order.rbegin(); vit != order.rend(); ++vit ) {
+    for ( size_t vid : outputInds ) {
+        auto key = H->vertex(vid);
+        auto opKey = flipBoth(H->vertex(vid));
+        auto opInd = H->index(opKey);
+        auto approxProb = probs[vid];
+        auto approxOtherProb = probs[ H->index(opKey) ];
+        
+        if ( (approxProb + approxOtherProb < 0.99 || approxProb + approxOtherProb > 1.01) and
+             (t->isLeaf(key.u()) and t->isLeaf(key.v())) ) {
+            std::cerr << "key = "; Utils::stringForKey(key, t); std::cerr << ", P(key) = " << approxProb << "\n";
+            std::cerr << "okey = "; Utils::stringForKey(opKey, t); std::cerr << ", P(okey) = " << approxOtherProb << "\n";
+            //std::abort();
+        }
+        
+        bool writeOut = true;
+
+        if ( approxProb > 0.0 && writeOut ) {
+            auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
+            if ( fs != "n" ) {
+                output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
+                       << "\t" << fs << "\t" << approxProb << "\n";
+            }
+        }
+    }
+    output.close();
+    std::cerr << "\n";
+
+}
+
+/* =============== END MAXIMUM LIKELIHOOD ================== */
+
+
 
 /**
  *  Add the appropriate hypervertices representing states
@@ -1383,167 +1829,6 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
     return slnSpaceGraph;
 }
 
-template< typename GT >
-void MLLeafCostDict( 
-    unique_ptr<ForwardHypergraph> &H, 
-    TreePtrT &T, 
-    GT &G, 
-    bool directed, 
-    double cc, 
-    double dc, 
-    slnDictT &slnDict 
-    ) {
-    /*
-      Given the duplication tree T, the root vertex rv, the extant graph G and
-      the constraints, fill in the values for the leaf nodes of the hypergraph
-    */
-    typedef typename boost::graph_traits< GT >::edge_descriptor EdgeT;
-    boost::timer::auto_cpu_timer timer;
-    auto undirected = !directed;
-    auto isLost = [&]( int nid ) -> bool { return (T->getNodeName(nid)).find("LOST") != std::string::npos; };
-    auto isLeaf = [&]( int nid ) -> bool { return  T->isLeaf(nid); };
-    // Cost of going from the state encoded by a node to the state of a true graph edge
-
-    auto none = FlipState::none;
-    auto fw = FlipState::forward;
-    auto rev = FlipState::reverse;
-    auto both = FlipState::both;
-
-    auto costDict = getCostDict(cc, dc, directed);
-    auto selfLoopCostDict = getSelfLoopCostDict(cc, dc, directed);
-    auto costFunDict = getCostFunDict(cc, dc, directed);
-    auto selfLoopCostFunDict = getSelfLoopCostFunDict(cc, dc, directed );
-
-    auto N = H->order();
-    auto M = H->size();
-
-    // The list of all hypernodes with no descendants
-    // We'll have either N^2 or (N^2)/2 leaf hypernodes (depending
-    // on directedness)
-    auto numExtantNodes = std::distance( vertices(G).first, vertices(G).second );
-    auto numConn = ( numExtantNodes * numExtantNodes );
-    if (undirected) {
-        numConn /= 2;
-    }
-    vector<size_t> leafHypernodes;
-    leafHypernodes.reserve(numConn);
-
-    // For every hypernode, it's a leaf <=> it has no incoming edges
-    for ( size_t i = 0; i < N; ++i) {
-        auto elist = H->incident(i);
-        if ( elist.size() == 0 ) {
-            leafHypernodes.push_back(i);
-        }
-    }
-
-    typedef typename GT::vertex_descriptor NodeT;
-    typedef unordered_set<NodeT> NodeSetT;
-
-    // Is the node e contained in the set s?
-    auto contains = [] ( const NodeSetT & s, NodeT e ) { return s.find(e) != s.end(); };
-
-    NodeSetT extantNodes;
-
-    Google<int>::Set leafIds;
-    leafIds.set_empty_key(-1);
-
-    for ( auto l : T->getLeavesId() ) { leafIds.insert(l); }
-
-    auto vp = boost::vertices(G);
-    for ( auto it = vp.first; it != vp.second; ++it ) {
-        auto v = *it;
-        auto idx = G[v].idx;
-        // found this node's id in the set of extant vertices
-        if ( leafIds.find(idx) != leafIds.end() ) {
-            extantNodes.insert(v);
-        }
-    }
-
-    // Map from tree node ID to graph vertex ID
-    unordered_map<int, NodeT> idToVertMap;
-    for ( auto v = boost::vertices(G).first; v != boost::vertices(G).second; ++ v ) {
-        idToVertMap[ G[*v].idx ] = *v;
-    }
-    //cerr << "ID TO VERTEX MAP SIZE = " << idToVertMap.size() << "\n";
-    size_t nlost = 0;
-    size_t nef = 0;
-    double tweight = 0.0;
-    // For every leaf hypernode
-    for ( auto n : leafHypernodes ) {
-        auto nd = H->vertex(n);
-
-        auto nameU = T->getNodeName(nd.u());
-        auto nameV = T->getNodeName(nd.v());
-
-        assert( isLeaf(nd.u()) and isLeaf(nd.v()) );
-
-        // Check to see if u, v, or both have been lost
-        auto endOfMap = idToVertMap.end();
-        bool lostU = ( idToVertMap.find( nd.u() ) == endOfMap ) || ( ! contains(extantNodes, idToVertMap[nd.u()]) );
-        bool lostV = ( idToVertMap.find( nd.v() ) == endOfMap ) || ( ! contains(extantNodes, idToVertMap[nd.v()]) );
-
-        /*
-        if ( !( isLeaf(nd.u()) and isLeaf(nd.v()) ) ) {
-            std::cerr << nameU << ", " << nameV << ", cost = 0.5\n";
-            //std::abort();
-            auto cost = 0.5;
-            vector<size_t> ev;
-            Google<Derivation::flipT>::Set es;
-            es.set_empty_key( make_tuple(-1, -1, ""));
-            nlost += 1;
-            slnDict[n] = { {0, Derivation(cost, n, ev, es)} };
-        }*/
-
-        // The cost to / between lost nodes is always 0
-        if ( lostU || lostV ) {
-            //double lostCost = ( nd.state() == FlipState::none ) ? 0.91 : 0.09;
-            auto lostCost = 0.5;
-            vector<size_t> ev;
-            Google<Derivation::flipT>::Set es;
-            es.set_empty_key( make_tuple(-1, -1, ""));
-            nlost += 1;
-            slnDict[n] = { {0, Derivation(lostCost, n, ev, es)} };
-        } else {
-            // Otherwise, u and v both exist in the extant
-            // network, so get the appropriate info
-            auto u = idToVertMap[nd.u()];
-            auto v = idToVertMap[nd.v()];
-            auto f = nd.f();
-            auto r = nd.r();
-
-            if (u != v) {
-                EdgeT fedge, redge;
-                bool d_f, d_r;
-                tie(fedge, d_f) = edge(u, v, G);
-                double w_f = d_f ? G[fedge].weight : 0.0;
-                tie(redge, d_r) = edge(v, u, G);
-                double w_r = d_r ? G[redge].weight : 0.0;
-                if ( undirected ) {
-                    assert( w_f == w_r );
-                }
-                auto cost = (d_f == nd.f() and d_r == nd.r()) ? 1.0 : 0.0;
-                Google<Derivation::flipT>::Set effectiveEdges;
-                effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
-                vector<size_t> ev;
-                slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges)} };
-
-            } else {
-                EdgeT e;
-                bool hasSelfLoop;
-                tie(e, hasSelfLoop) = edge(u, v, G);
-                double w_l = hasSelfLoop ? G[e].weight : 0.0;
-
-                auto cost = ( nd.f() == hasSelfLoop ) ? 1.0 : 0.0;
-                Google<Derivation::flipT>::Set effectiveEdges;
-                effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
-                vector<size_t> ev;
-                slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges)} };
-
-            } // ( u != v )
-        } // ( lostU || lostV )
-    } // loop over leaf hypernodes
-}
-
 
 /**
 *  Given the duplication tree T, the root vertex rv, the extant graph G and
@@ -1858,7 +2143,7 @@ vector< tuple<double, BigInt> > countEdgeSolutions(
         for ( size_t i = 0; i < inds.size(); ++i ) {
             if (printMe) {
                 auto vert = H->vertex(tailNodes[i]);
-                cerr << vstr( vert ) << "\n";
+                cerr << Utils::stringForKey(vert, t) << "\n";
                 cerr << "i = " << i << ", score = " << countDict[ tailNodes[i] ][ inds[i] ].score << ", count = " << countDict[ tailNodes[i] ][ inds[i] ].count << "\n";
             }
 
@@ -2444,7 +2729,7 @@ bool viterbiCountNew(
         auto key = H->vertex(vid);
         if ( H->incident(vid).size() == 0 && vid != rootIdFlip && vid != rootIdNoFlip ) {
             if ( outProbMap[vid] != probMap[vid] ) { //&& outProbMap[vid] > probMap[vid] ) {
-                LOG_WARN(log) << "node " << vstr(key) << ", inProbMap has " << probMap[vid] << ", outProbMap has " << outProbMap[vid] << "\n";
+                LOG_WARN(log) << "node " << Utils::stringForKey(key, t) << ", inProbMap has " << probMap[vid] << ", outProbMap has " << outProbMap[vid] << "\n";
             }
             outProbMap[vid] = probMap[vid];
         }
@@ -2683,291 +2968,6 @@ FlipKey keyForAction( const FlipKey &fk , const string &ft ) {
     if ( ft == "r+" || ft == "r-" ) {
         return flipReverse(fk);
     }
-}
-
-
-
-double computeVertexProbability(const size_t &vid,
-                                const TreePtrT& t,
-                                const std::vector<double> &probs,
-                                const boost::dynamic_bitset<> &normed,
-                                unique_ptr<ForwardHypergraph> &H,
-                                Model &model) {
-
-    auto printWithNames = [&] (size_t ind) -> void {
-        auto k = H->vertex(ind);
-        auto dirStr = (k.f() and k.r()) ? " <--> " : " X ";
-        std::cerr << "[ " << t->getNodeName(k.u()) << ", " << t->getNodeName(k.v()) << 
-            " : " << dirStr << "] ";
-    };
-
-    /**
-    * Determines if the transition from the key parent to the key child is valid.
-    * Any transition in which the state of the interaction is not altered (not flipped) between the 
-    * parent and child is valid.  If the state of the interaction is flipped, the transition is only
-    * valid if the interacting nodes ( (u,v) in the parent ) exist in the same species.
-    */
-    auto isValidTransition = [&]( const FlipKey& parent, const FlipKey& child ) -> bool {
-        if ( (parent.state() != child.state()) ) {
-            auto us = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.u(),"S") )->toSTL();
-            auto vs = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.v(),"S") )->toSTL();
-            return us == vs;
-        } 
-        return true;        
-    };
-
-    auto incomingEdges = H->incident(vid);
-    // We already know the probability of all of the leaves
-    if ( incomingEdges.size() == 0 ) { return probs[vid]; }
-
-    auto parentVertex = H->vertex(vid);
-    double prob = 0.0;
-    size_t k = 0;
-
-    // For each edge incident to this vertex
-    for (auto & eid : incomingEdges) {
-        auto edge = H->edge(eid);
-
-        // probability of the tail vertices
-        double tprob = 1.0;
-        size_t i = 0;
-
-        // For every tail vertex of this hyperedge
-        for (auto tid : edge.tail()) {
-            auto childVertex = H->vertex(tid);
-            //assert( normed[tid] );        
-            tprob *= probs[tid] * model.transitionProbability( childVertex, parentVertex );
-        }
-
-        prob += tprob;
-    }
-
-    return prob;
-
-}
-
-template <typename CostClassT>
-void probabilistic( unique_ptr<ForwardHypergraph> &H,
-                    Model &model,
-                    TreePtrT &t,
-                    const vector<size_t> &order,
-                    slnDictT &slnDict,
-                    const string &outputName,
-                    const vector<size_t> &outputKeys ) {
-
-    // Compute the *weighted* probability of each edge being in
-    // the top k distinct scoring solutions
-    cpplog::FileLogger log( "log.txt", true );
-
-    size_t maxID = *(std::max_element(order.begin(), order.end()));
-
-    // Dictionary that holds the top-k cost classes for each
-    // vertex, as well as other relevant information
-    vector< vector<CostClassT> > tkd(maxID + 1, vector<CostClassT>() ); //unordered_map< size_t, vector<CostClass> > tkd;
-
-    /**
-    * Dictionary that holds the probability of each state for each vertex
-    */
-    typedef double LogProbT;
-    vector< LogProbT > probs( maxID + 1, 0.0 );
-    boost::dynamic_bitset<> normed( maxID + 1 );
-
-    auto vstr = [&]( const FlipKey & vert ) -> string {
-        auto uname = t->getNodeName(vert.u());
-        auto vname = t->getNodeName(vert.v());
-        if (uname > vname) {
-            auto tmp = vname;
-            vname = uname;
-            uname = tmp;
-        }
-        auto fstr = vert.f() ? "true" : "false";
-        auto rstr = vert.r() ? "true" : "false";
-        return uname + "\t" + vname + "\t" + fstr + "\t" + rstr;
-    };
-
-
-    auto printWithNames = [&] (size_t ind) -> void {
-        auto k = H->vertex(ind);
-        auto dirStr = (k.f() and k.r()) ? " <--> " : " X ";
-        std::cerr << "[ " << t->getNodeName(k.u()) << ", " << t->getNodeName(k.v()) << 
-            " : " << dirStr << "] ";
-    };
-    
-    double costsum = 0.0;
-
-    // Each leaf has a single solution which is, by definition, of optimal cost
-    for ( const auto & vit : order ) {
-        if ( H->isLeaf(vit) ) {
-            probs[vit] = slnDict[vit][0].cost;
-            normed[vit] = 1;
-        }
-    }
-
-    typedef size_t edgeIdT;
-    auto N = order.size();
-    size_t ctr = 0;
-    ProgressDisplay showProgress(order.size());
-
-    auto allNodesInvolving = [&] ( int u, int v ) -> std::vector<size_t> {
-        std::vector<FlipState> fr = { FlipState::none, FlipState::both };
-        std::vector<MustConnect> cucv = { MustConnect::none, MustConnect::left, MustConnect::right, MustConnect::both };
-        std::vector< size_t > keys;
-
-        for ( auto& dir : fr ) { // for all flip states
-            for ( auto& cstate : cucv ) { // for all connect states
-                FlipKey k(u, v, dir, cstate);
-                if ( H->contains( k ) ) {
-                    keys.push_back( H->index(k) );
-                }
-            }
-        }
-        return keys;
-    };
-
-    // For each vertex, in topological order (up)
-    for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr, ++showProgress ) {
-
-        /*
-         for ( auto e : H->incident(*vit) ) {
-            auto edge = H->edge(e);
-            for ( auto v : edge.tail() ) {
-               auto key = H->vertex(v);
-               
-               auto opKey = flipBoth(key);
-               auto opInd = H->index(opKey);
-               
-               if ( !H->isLeaf(v) ) {
-
-                auto states = {v, opInd};
-                double probSum = 0.0;
-                for ( auto s : states ) { probSum += probs[s]; }                
-                if ( ! (probSum > 0) ) {
-                    for ( auto s : states ) {
-                        if ( H->incident( opInd ).size() > 0 ) {
-                            std::cerr << "P("; printWithNames( s ); std::cerr << ") = " << probs[s] << "\n";
-                        }
-                    }
-                    //std::abort();
-                 }
-                 if ( probSum > 0 ) {
-                    for ( auto s : states ){ 
-                        probs[s] /= probSum;
-                    }
-                    //probs[v] /= probSum;
-                    //probs[opInd] /= probSum;
-                    //assert( probs[v] + probs[opInd] > 0.99 && probs[v] + probs[opInd] < 1.01 );
-                    auto tmpSum = 0.0;
-                    for ( auto s : states ) { tmpSum += probs[s]; }
-                    assert( tmpSum > 0.99 && tmpSum < 1.01 );
-                    
-                 }
-                 //normed[v] = true; normed[opInd] = true;
-                 for ( auto s : states ) { normed[s] = 1; }
-               }
-           }
-        } 
-        */
-       
-        auto vert = H->vertex(*vit);
-        auto probVert = computeVertexProbability(*vit, t, probs, normed, H, model);
-        probs[ *vit ] = probVert;
-
-    } // loop over verts
-
-    typedef Google< size_t, double >::Map probMapT;
-    size_t invalidIdx = std::numeric_limits<size_t>::max();
-    probMapT probMap;
-    probMapT outProbMap;
-    probMap.set_empty_key( invalidIdx );
-    outProbMap.set_empty_key( invalidIdx );
-
-    // Map from a vertex to the maximum cost class that is
-    // considered in deriving any solution that is actually used.
-    FlipKey rootKey( t->getRootId(), t->getRootId(), FlipState::none );
-    auto rootInd = H->index(rootKey);
-
-    ctr = 0;
-    size_t tot = order.size();
-    auto rootFlip = flipBoth(rootKey);
-    H->addVertex( rootFlip );
-    auto rootIdNoFlip = H->index(rootKey);
-    auto rootIdFlip = H->index(rootFlip);
-
-    cerr << "Down phase\n";
-    showProgress.restart(order.size());
-
-    std::vector<LogProbT> outProbs( probs.size(), 0.0 );
-
-    // Compute the probabilities (down)
-    // Loop over all vertices in *reverse* topological order
-    for ( auto vit = order.rbegin(); vit != order.rend(); ++vit, ++ctr, ++showProgress ) {
-        if( !normed[*vit] ) {
-            auto k = H->vertex(*vit);
-            /*
-            std::cerr << "key ";
-            printWithNames(*vit);
-            std::cerr << " is not normed!!\n";
-            std::abort();
-            */
-        }
-        /*
-        // for all incoming edges contributing to this cost class
-        for ( const auto & e : H->incident(*vit) ) {
-          // What is the action along edge 'e' (i.e. how is
-          // the state of the interaction function different
-          // between *vit and the tail nodes of e)
-          auto tail = H->edge(e).tail();
-          auto ft = flipType( H->vertex(*vit), H->vertex(tail[0]) );
-          auto outKey = keyForAction( H->vertex(*vit), ft );
-          auto outInd = H->index(outKey);
-          outProbs[outInd] += probs[*vit];
-        }
-        */
-    }
-
-    bool restrictOutput = false;
-    std::vector<size_t> outputInds;
-    if ( outputKeys.size() > 0 ) {
-        restrictOutput = true;
-        outputInds = outputKeys;
-    } else {
-        outputInds.resize(order.size(), 0);
-        std::iota(outputInds.begin(), outputInds.end(), 0);
-    }
-
-
-    //bool restrictOutput = false;
-    string fname = outputName;
-    std::fstream output( fname, std::fstream::out | std::fstream::trunc );
-
-    //for ( size_t vid = 0; vid < H->order(); ++vid ) { // order.rbegin(); vit != order.rend(); ++vit ) {
-    for ( size_t vid : outputInds ) {
-        auto key = H->vertex(vid);
-        auto opKey = flipBoth(H->vertex(vid));
-        auto opInd = H->index(opKey);
-        auto approxProb = probs[vid];
-        auto approxOtherProb = probs[ H->index(opKey) ];
-        
-        if ( (approxProb + approxOtherProb < 0.99 || approxProb + approxOtherProb > 1.01) and
-             (t->isLeaf(key.u()) and t->isLeaf(key.v())) ) {
-            std::cerr << "key = "; printWithNames(vid); std::cerr << ", P(key) = " << approxProb << "\n";
-            std::cerr << "okey = "; printWithNames(opInd); std::cerr << ", P(okey) = " << approxOtherProb << "\n";
-            //std::abort();
-        }
-        
-        bool writeOut = true;
-
-        if ( approxProb > 0.0 && writeOut ) {
-            auto fs = flipStrMap[key.state()];//.find(key.getDirTuple())->second;
-            if ( fs != "n" ) {
-                output << t->getNodeName(key.u()) << "\t" << t->getNodeName(key.v())
-                       << "\t" << fs << "\t" << approxProb << "\n";
-            }
-        }
-    }
-    output.close();
-    std::cerr << "\n";
-
 }
 
 
@@ -3216,7 +3216,7 @@ void viterbiCount( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, 
         map< double, vector<tuple<size_t, BigInt> > > edgeCostMap;
 
         //cerr << "SLN FOR NODE " << vstr(vert) << "\n";
-        out << vstr(vert);// << H->incident(*vit).size() << "\n";
+        out << Utils::stringForKey(vert, t);// << H->incident(*vit).size() << "\n";
         std::vector<BigInt> nedgesln;
         // loop over all incoming edges and compute the # of
         // solutions over each edge as well as that solution's cost
@@ -3355,7 +3355,7 @@ void viterbiCount( unique_ptr<ForwardHypergraph> &H, TreePtrT &t, TreeInfo &ti, 
         //edgeProbMap.foreach{ case (eind, smap) =>
         auto eind = em.first;
         auto smap = em.second;
-        epout << vstr( H->vertex(H->getHead(eind)) )  << "\t";
+        epout << Utils::stringForKey(H->vertex(H->getHead(eind)), t)  << "\t";
         epout << H->edge(eind).weight() << "\t" << smap.size()  << "\n";
         for ( auto sp : smap ) {
             epout << sp.first << "\t" << sp.second << "\n";
@@ -4143,9 +4143,9 @@ using GraphUtils::undirectedGraphT;
 using GraphUtils::directedGraphT;
 using std::unique_ptr;
 
-template void MultiOpt::MLLeafCostDict< undirectedGraphT  >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , undirectedGraphT & , bool , double , double , MultiOpt::slnDictT & );
+template void MultiOpt::MLLeafCostDict< undirectedGraphT  >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & ,  Utils::TreeInfo& ti, undirectedGraphT & , bool , double , double , MultiOpt::slnDictT & );
 
-template void MultiOpt::MLLeafCostDict< directedGraphT >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , directedGraphT & , bool , double , double , MultiOpt::slnDictT & );
+template void MultiOpt::MLLeafCostDict< directedGraphT >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & ,  Utils::TreeInfo& ti, directedGraphT & , bool , double , double , MultiOpt::slnDictT & );
 
 template void MultiOpt::leafCostDict< undirectedGraphT  >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , Utils::TreeInfo& ti, undirectedGraphT & , bool , double , double , MultiOpt::slnDictT & );
 

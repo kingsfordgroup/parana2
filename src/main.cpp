@@ -90,9 +90,9 @@ using namespace boost::interprocess::detail;
 
 void printUsage() {
     auto usage = R"(Usage:
-                 parana++ {pars,prob} [opts]
-                 parana++ -h | --help
-                 parana++ -v | --version
+                 parana2 {pars,prob} [opts]
+                 parana2 -h | --help
+                 parana2 -v | --version
 
                  Arguments:
                  pars    Use the parsimonious recovery algorithm
@@ -123,7 +123,7 @@ void printHelpUsage( ArgParser &ap,
             }
         } else {
             printUsage();
-            std::cerr << "\nFor information on a specific method, try \"parana++ {pars,prob} --help\"\n";
+            std::cerr << "\nFor information on a specific method, try \"parana2 {pars,prob} --help\"\n";
             std::exit(1);
         }
     }
@@ -166,8 +166,8 @@ int main( int argc, char **argv ) {
     ("numOpt,k", po::value< size_t>()->default_value(40), "number of near-optimal score classes to use")
     ("timePenalty,p", po::value< double >()->default_value(1.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
     ("single,s", po::value<bool>()->zero_tokens(), "compute a single optimal set of flips (i.e. \"Parana 1\")")
-    ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm")
-    ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm")
+    ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm (deprecated)")
+    ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm (not yet implemented)")
     ;
 
     // Those options only relevant to the probabilistic method
@@ -444,9 +444,9 @@ int main( int argc, char **argv ) {
                 MultiOpt::slnDictT slnDict;
                 slnDict.resize(order.size());
                 if ( undirected ) {
-                    MultiOpt::MLLeafCostDict( H, tree, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    MultiOpt::MLLeafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
                 } else {
-                    MultiOpt::MLLeafCostDict( H, tree, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                    MultiOpt::MLLeafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
                 }
 
                 MultiOpt::probabilistic<CostClass<EdgeDerivInfoEager>>(H, model, tree, order, slnDict, outputName, keyList );

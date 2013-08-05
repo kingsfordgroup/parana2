@@ -22,7 +22,11 @@
 #include <Bpp/Phyl/Tree.h>
 #include <Bpp/Exceptions.h>
 
+//#include "FlipKey.hpp"
 #include "ParanaCommon.hpp"
+
+// forward declaration
+class FlipKey;
 
 namespace Utils {
     using std::get;
@@ -148,6 +152,7 @@ namespace Utils {
         void prepareTree( TreePtrT& t, TreeInfo& ti, int nid );
     }
 
+    string stringForKey (const FlipKey& key, const Trees::TreePtrT& t);
 }
 
 #endif // TREEUTILS_HPP

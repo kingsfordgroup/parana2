@@ -118,24 +118,31 @@ public:
 		std::tie(childU, childV) = std::make_tuple(child.u(), child.v());
 
 		FlipKey::NodeIndexT pnode, cnode, onode;
-		if ( parentU == childU ) {
-			pnode = parentU; cnode = childV; onode = parentV;
-		} else if ( parentU == childV ) {
-			pnode = parentU; cnode = childU; onode = parentV;
-		} else if ( parentV == childU ) {
-			pnode = parentV; cnode = childV; onode = parentU;
-		} else if ( parentV == childV ) {
-			pnode = parentV; cnode = childU; onode = parentU;
-		}
 
+		if (parentU == parentV) {
+			auto dist =  _t->getDistanceToFather(childU) + _t->getDistanceToFather(childV);
+			return _transitionProbability(child, parent, dist);
+		} else {
 
-		auto dist = _t->getDistanceToFather(cnode);//1.0;
-		//auto dist = bpp::TreeTools::getDistanceBetweenAnyTwoNodes( *_t.get(), onode, cnode);
-		//auto dist = _distMat->operator()(onode, cnode);
-		//auto dist = 1.0;
-		//auto dist = _tinfo.intervalDistance(cnode, pnode);
+			if ( parentU == childU ) {
+				pnode = parentU; cnode = childV; onode = parentV;
+			} else if ( parentU == childV ) {
+				pnode = parentU; cnode = childU; onode = parentV;
+			} else if ( parentV == childU ) {
+				pnode = parentV; cnode = childV; onode = parentU;
+			} else if ( parentV == childV ) {
+				pnode = parentV; cnode = childU; onode = parentU;
+			}
 
-		return _transitionProbability( child, parent, dist );
+  		//auto dist = _t->getDistanceToFather(cnode);//1.0;
+  		auto dist = bpp::TreeTools::getDistanceBetweenAnyTwoNodes( *_t.get(), onode, cnode);
+	  	//auto dist = _distMat->operator()(onode, cnode);
+		  //auto dist = 1.0;
+		  //auto dist = _tinfo.intervalDistance(cnode, pnode);
+
+  		return _transitionProbability( child, parent, dist );
+  	}
+
 	}
 };
 

@@ -6,6 +6,8 @@
 #include <boost/heap/skew_heap.hpp>
 #include <Bpp/Phyl/Io/Nhx.h>
 #include "ParanaCommon.hpp"
+#include "FlipKey.hpp"
+
 using boost::heap::fibonacci_heap;
 using boost::heap::pairing_heap;
 
@@ -16,8 +18,30 @@ namespace Utils {
         result = std::floor(result);
         result = result / 1000;
         return result;
-    };
+    }
 
+    
+    string stringForKey (const FlipKey& key, const Trees::TreePtrT& t) {
+        auto uname = t->getNodeName(key.u());
+        auto vname = t->getNodeName(key.v());
+        if (uname > vname) {
+            auto tmp = vname;
+            vname = uname;
+            uname = tmp;
+        }
+
+        string fstr = "";
+        if ( key.state() == FlipState::both ) {
+            fstr = "<-->";
+        } else if ( key.state() == FlipState::none ) {
+            fstr = "X";
+        } else {
+            std::abort();
+        }
+        return "[" + uname + ", " + vname + "] : " + fstr;
+    } 
+    
+   
     bool advanceElems( vector<size_t>& ptrs, const vector<size_t>& sizes ) {
 
         assert( ptrs.size() == sizes.size() );
