@@ -47,5 +47,7 @@ FILE( GLOB CVFILES ${PROJECT_ROOT}/data/cvfiles/*.xml )
 INSTALL( PROGRAMS ${EXECUTABLE_OUTPUT_PATH}/parana2 DESTINATION bin )
 INSTALL( FILES ${DEPENDENT_LIBS} DESTINATION bin )
 INSTALL( FILES ${SCRIPTS} DESTINATION scripts )
-INSTALL( FILES ${PROJECT_ROOT}/data/SimpleUndirectedModel.txt DESTINATION data )
+INSTALL( FILES ${PROJECT_ROOT}/data/SimpleUndirectedModel.xml
+               ${PROJECT_ROOT}/data/UndirectedParsimonyModel.xml 
+               DESTINATION data )
 INSTALL( FILES ${CVFILES} DESTINATION data/cvfiles )

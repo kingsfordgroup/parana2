@@ -14,9 +14,9 @@ using boost::heap::pairing_heap;
 namespace Utils {
 
     double round3( double num ) {
-        double result = num * 1000;
+        double result = num * 100000;
         result = std::floor(result);
-        result = result / 1000;
+        result = result / 100000;
         return result;
     }
 
@@ -196,6 +196,94 @@ namespace Utils {
             return true;
         }
 
+        /**
+         * Returns `true` if the event occuring at node `k` is a speciation event
+         * (i.e. both k.u() and k.v() have decendants in different species) and `false`
+         * otherwise.
+         * @param  k The hypervertex to check
+         * @param  t The phylogenetic tree 
+         * @return   `true` if the decendants of this hypervertex represent
+         *           a speciation and `false` otherwise
+         */
+        bool isSpeciationEvent(const FlipKey& k, const TreeInfo& ti) {
+            auto u = k.u();
+            auto v = k.v();
+            const TreePtrT& t = ti.tree;
+            // If either node is a leaf, they can't have decendant species
+            if (t->isLeaf(u) or t->isLeaf(v)) { return false; }
+
+            // Get the child nodes
+            int lu, ru, lv, rv;
+            lu = ru = lv = rv = -1;            
+    
+            auto sons = t->getSonsId(u);
+            lu = sons[0]; ru = sons[1]; 
+            if (lu > ru) { std::swap(lu, ru); }
+
+            sons = t->getSonsId(v);
+            lv = sons[0]; rv = sons[1]; 
+            if (lv > rv) { std::swap(lv, rv); }
+
+            auto specu = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(u, "S"))->toSTL();
+            auto specv = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(v, "S"))->toSTL();
+            auto speclu = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(lu, "S"))->toSTL();
+            auto speclv = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(lv, "S"))->toSTL();
+            auto specru = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(ru, "S"))->toSTL();
+            auto specrv = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(rv, "S"))->toSTL();                                    
+
+            bool parentsAreSameSpecies = specu == specv;
+            bool uSpeciates = speclu != specru;
+            bool vSpeciates = speclv != specrv;
+            bool speciesMatch = ((speclu == speclv) or (speclu == specrv)) and
+                                ((specru == speclv) or (specru == specrv)); 
+
+
+            bool speciationEvent = (parentsAreSameSpecies and uSpeciates and vSpeciates and speciesMatch);
+
+            return speciationEvent;
+        }
+
+        /**
+         * NOTE: Assumes isSpeciationEvent(k, ti) !!
+         * For the node k = ({u, v}, s), returns the children of u and v corresponding
+         * to the first species as the first two elements of the tuple and the children
+         * corresponding to the second species as the last two elements of the tuple.
+         * @param  k  Hypervertex whose children are to be put into correspondence
+         * @param  ti The tree info
+         */
+        std::tuple<int, int, int, int> correspondingSpecies(const FlipKey& k, const TreeInfo& ti) {
+            auto u = k.u();
+            auto v = k.v();
+            const TreePtrT& t = ti.tree;
+
+            // Get the child nodes
+            int lu, ru, lv, rv;
+            lu = ru = lv = rv = -1;            
+    
+            auto sons = t->getSonsId(u);
+            lu = sons[0]; ru = sons[1]; 
+            if (lu > ru) { std::swap(lu, ru); }
+
+            sons = t->getSonsId(v);
+            lv = sons[0]; rv = sons[1]; 
+            if (lv > rv) { std::swap(lv, rv); }
+
+            auto speclu = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(lu, "S"))->toSTL();
+            auto speclv = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(lv, "S"))->toSTL();
+            auto specru = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(ru, "S"))->toSTL();
+            auto specrv = dynamic_cast< bpp::BppString* >(ti.tree->getNodeProperty(rv, "S"))->toSTL();                                    
+
+            if (speclu == speclv) {
+                //std::cerr << "returning (" << speclu << ", " << speclv <<
+                //             ", " << specru << ", " << specrv << ")\n";
+                return make_tuple(lu, lv, ru, rv);
+            } else {
+                //std::cerr << "returning (" << speclu << ", " << specrv <<
+                //             ", " << specru << ", " << speclv << ")\n";
+                return make_tuple(lu, rv, ru, lv);
+            }
+        }
+
         TreePtrT readNewickTree( const std::string& treeName ) {
             unique_ptr<bpp::Nhx> newickReader( new bpp::Nhx(true) ); //No comment allowed!
             //newickReader->enableExtendedBootstrapProperty("name");
@@ -214,7 +302,7 @@ namespace Utils {
         }
 
 
-        const std::string getName( TreePtrT& t, int nid) {
+        const std::string getName( const TreePtrT& t, int nid) {
             if ( t->hasNodeProperty(nid,"GN") ) {
                 auto name = dynamic_cast<bpp::BppString*>( t->getNodeProperty(nid,"GN"))->toSTL();
                 return name;

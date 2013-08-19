@@ -3,9 +3,11 @@
 #include "ProgressDisplay.hpp"
 #include "ezETAProgressBar.hpp"
 #include "model.hpp"
+#include "ParsimonyCosts.hpp"
 //#include "mpl_cartprod.hpp"
 #include "combination.hpp"
 
+#include <sstream>
 #include <stack>
 #include <deque>
 #include <cmath>
@@ -69,6 +71,45 @@ FlipState directionsToFlipState( bool f, bool r ) {
     if ( !f and !r ) { return FlipState::none; }
 }
 
+costMapT getSpecCostDict ( double cc, double dc, bool directed ) {
+    auto undirected = ! directed;
+    auto none = FlipState::none;
+    auto fw = FlipState::forward;
+    auto rev = FlipState::reverse;
+    auto both = FlipState::both;
+
+    double keepInt = 0.001;
+    double gainInt = 0.99;//cc;
+    double looseInt = 0.99;//dc;//1.0 - keepInt;
+    double keepNoInt = 0.001;//1.0 - gainInt;
+
+    costMapT costDict;
+    costDict[ none ][ none ] = make_tuple( keepNoInt, "n" );
+    costDict[ none ][ fw ] = make_tuple( gainInt, "f+" );
+    costDict[ none ][ rev ] = make_tuple( gainInt, "r+" );
+    costDict[ none ][ both ] = make_tuple( undirected ? gainInt : 2 * gainInt , "b+" );
+
+    /*
+    costDict[ rev ][ none ] = make_tuple( dc, "r-" );
+    costDict[ rev ][ fw ] = make_tuple( cc + dc, "f+r-" );
+    costDict[ rev ][ rev ] = make_tuple( 0.0, "n" );
+    costDict[ rev ][ both ] = make_tuple( cc , "f+" );
+
+    costDict[ fw ][ none ] = make_tuple( dc, "f-" );
+    costDict[ fw ][ fw ] = make_tuple( 0.0, "n" );
+    costDict[ fw ][ rev ] = make_tuple( cc + dc, "f-r+" );
+    costDict[ fw ][ both ] = make_tuple( cc , "r+" );
+    */
+   
+    costDict[ both ][ none ] = make_tuple( undirected ? looseInt : 2 * looseInt, "b-" );
+    costDict[ both ][ fw ] = make_tuple( looseInt, "r-" );
+    costDict[ both ][ rev ] = make_tuple( looseInt, "f-" );
+    costDict[ both ][ both ] = make_tuple( keepInt, "n");
+
+    return costDict;
+}
+
+
 costMapT getCostDict ( double cc, double dc, bool directed ) {
     auto undirected = ! directed;
     auto none = FlipState::none;
@@ -76,11 +117,17 @@ costMapT getCostDict ( double cc, double dc, bool directed ) {
     auto rev = FlipState::reverse;
     auto both = FlipState::both;
 
+    double keepInt = 0.15;
+    double gainInt = 0.99;//cc;
+    double looseInt = 0.85;//dc;
+    double keepNoInt = 0.01;
+
+
     costMapT costDict;
-    costDict[ none ][ none ] = make_tuple( 0.0, "n" );
-    costDict[ none ][ fw ] = make_tuple( cc, "f+" );
-    costDict[ none ][ rev ] = make_tuple( cc, "r+" );
-    costDict[ none ][ both ] = make_tuple( undirected ? cc : 2 * cc , "b+" );
+    costDict[ none ][ none ] = make_tuple( keepNoInt, "n" );
+    costDict[ none ][ fw ] = make_tuple( gainInt, "f+" );
+    costDict[ none ][ rev ] = make_tuple( gainInt, "r+" );
+    costDict[ none ][ both ] = make_tuple( undirected ? gainInt : 2 * gainInt , "b+" );
 
     costDict[ rev ][ none ] = make_tuple( dc, "r-" );
     costDict[ rev ][ fw ] = make_tuple( cc + dc, "f+r-" );
@@ -92,13 +139,14 @@ costMapT getCostDict ( double cc, double dc, bool directed ) {
     costDict[ fw ][ rev ] = make_tuple( cc + dc, "f-r+" );
     costDict[ fw ][ both ] = make_tuple( cc , "r+" );
 
-    costDict[ both ][ none ] = make_tuple( undirected ? dc : 2 * dc, "b-" );
-    costDict[ both ][ fw ] = make_tuple( dc, "r-" );
-    costDict[ both ][ rev ] = make_tuple( dc, "f-" );
-    costDict[ both ][ both ] = make_tuple( 0.0, "n");
+    costDict[ both ][ none ] = make_tuple( undirected ? looseInt : 2 * looseInt, "b-" );
+    costDict[ both ][ fw ] = make_tuple( looseInt, "r-" );
+    costDict[ both ][ rev ] = make_tuple( looseInt, "f-" );
+    costDict[ both ][ both ] = make_tuple( keepInt, "n");
 
     return costDict;
 }
+
 
 costMapFunT getCostFunDict ( double cc, double dc, bool directed ) {
     auto undirected = ! directed;
@@ -309,31 +357,17 @@ void topologicalOrder( unique_ptr<ForwardHypergraph> &H, TreePtrT& tree, const T
  */
 template <typename T>
 double existencePenalty( const TreeInfo &ti, const T &vert, double penalty, double travWeight ) {
-    // Original (March 5)    
-    // auto dist = ti.intervalDistance( vert.u(), vert.v() );
-    // auto mult = (vert.state() == FlipState::none) ? 1.0 : 0.5;    
-    // auto penatly = (travWeight > 0.0 and dist > 0.0) ? 1.0 + mult*std::exp(dist*penalty) : 1.0;
-    // double res1 = travWeight * (( penalty > 1.0 ) ? penalty : 1.0);
-    // return res1;
 
-    // double height = 2.0 * 3.23;
-    // auto d1 = const_cast<TreeInfo&>(ti).extantInterval[vert.u()].birth;
-    // auto d2 = const_cast<TreeInfo&>(ti).extantInterval[vert.v()].birth;
-
-    double res2 = 0.0;
-    //auto dist = ti.intervalDistance( vert.u(), vert.v() );
-    //auto mult = (vert.state() == FlipState::none) ? 1.0 : 1.0;    
-    //dist = std::max( dist, 1.0 );
-    //if ( dist > 0.5 ) { dist = 10.0; } else { dist = 0.0; }
-    //res2 = travWeight  + mult * (std::exp(penalty*dist*dist) - 1.0);
-    res2 = travWeight + travWeight * penalty;//std::exp(dist);
-    //res2 = travWeight + travWeight * penalty * dist;
-
-    // if ( travWeight != res2 ) {
-    //     std::cerr << "before penalty = " << travWeight << ", after penalty = " << res2 << "\n";
-    // }
-
-    return res2;
+    /**
+     * Okay; this is super heuristic-y and we need to figure out
+     * the "right thing" here in terms of the penalty function.
+     */
+    if (penalty > 0.0) {
+        auto dist = ti.intervalDistance( vert.u(), vert.v() );
+        return travWeight * std::exp(penalty * (1.0 + dist));
+    } else {
+        return travWeight;
+    }
 
 }
 
@@ -353,6 +387,7 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
         Model &model,
         bool directed ) {
 
+    double penalty = 1.0;
     cpplog::FileLogger log( "log.txt", true );
 
     boost::timer::auto_cpu_timer timer("Building (ML) Hypergraph [%ws wall, %us user + %ss system = %ts CPU (%p%)]\n");
@@ -373,7 +408,6 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
     * valid if the interacting nodes ( (u,v) in the parent ) exist in the same species.
     */
     auto isValidTransition = [&]( const FlipKey& parent, const FlipKey& child ) -> bool {
-
         if ( parent.state() == FlipState::none and (parent.state() != child.state()) ) {
             auto us = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.u(),"S") )->toSTL();
             auto vs = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.v(),"S") )->toSTL();
@@ -382,6 +416,13 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
         return true;        
     };
 
+    /**
+    * A term (hypervertex) is valid if neither u nor v is lost 
+    * and u and v are in the same species.
+    */
+    auto isValidTerm = [&]( const FlipKey& fk ) -> bool {
+        return (Utils::Trees::sameSpecies(t, fk.u(), fk.v()) and !(isLost(fk.u()) || isLost(fk.v())));
+    };
 
     auto rootId = t->getRootId();
     auto rootName = t->getNodeName( rootId );
@@ -390,7 +431,7 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
 
     unique_ptr<ForwardHypergraph> slnSpaceGraph( new ForwardHypergraph() );
 
-    auto addIncomingHyperedge = [ = , &slnSpaceGraph, &t] (const FlipKey & k ) -> void {
+    auto addIncomingHyperedge = [ = , &slnSpaceGraph, &t] (const FlipKey & k ) -> bool {
         typedef std::vector<FlipKey> FlipKeyVec;
 
         auto addCartesianProduct = [&] ( 
@@ -498,14 +539,75 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
                 if (!isLost(RU)) {
                     iterKeys.push_back( {{RU, RU, FlipState::both},{RU, RU, FlipState::none}} );
                 }
-                if (not differentExtantNetworks(ti, LU, RU) and !(isLost(LU) or isLost(RU))) {
+                if (Utils::Trees::sameSpecies(t, LU, RU) and
+                    //not differentExtantNetworks(ti, LU, RU) and
+                    !(isLost(LU) or isLost(RU))) {
                     iterKeys.push_back( {{LU, RU, FlipState::both},{LU, RU, FlipState::none}} );
                 }
                 addCartesianProduct(iterKeys, none, edgeAlwaysOk);
-            
+
             } // isInternal(U)
 
         } else { // not a self-loop
+
+            
+          if (Utils::Trees::isSpeciationEvent(k, ti)) { 
+            int specAU, specAV, specBU, specBV;
+            tie(specAU, specAV, specBU, specBV) = Utils::Trees::correspondingSpecies(k, ti);
+
+            bool haveA = !(isLost(specAU) or isLost(specAV));
+            bool haveB = !(isLost(specBU) or isLost(specBV));
+
+            vector<FlipKey> noFlip, flipBoth, flipA, flipB;
+
+            auto state = FlipState::none;
+            auto flippedState = FlipState::both;
+
+            if (haveA and haveB) {
+                noFlip   = {FlipKey(specAU, specAV, state), 
+                FlipKey(specBU, specBV, state)};
+                flipBoth = {FlipKey(specAU, specAV, flippedState), 
+                FlipKey(specBU, specBV, flippedState)};
+                flipA    = {FlipKey(specAU, specAV, flippedState), 
+                FlipKey(specBU, specBV, state)};
+                flipB    = {FlipKey(specAU, specAV, state), 
+                FlipKey(specBU, specBV, flippedState)};                                                           
+
+            } else if (haveA) {
+                noFlip   = {FlipKey(specAU, specAV, state)};
+                flipA    = {FlipKey(specAU, specAV, flippedState)};
+            } else if (haveB) {
+                noFlip   = {FlipKey(specBU, specBV, state)};                    
+                flipB    = {FlipKey(specBU, specBV, flippedState)};                                                            
+            } else {
+                return false;
+            }
+
+            bool addedEdge{false};
+            if (noFlip.size() > 0) {
+                double w = 1.0;
+                slnSpaceGraph->addEdge(noFlip, k, w);
+                addedEdge = true;
+            }
+            if (flipA.size() > 0) {
+                double w = 1.0;
+                slnSpaceGraph->addEdge(flipA, k, w);
+                addedEdge = true;                    
+            }
+            if (flipB.size() > 0) {
+                double w = 1.0;
+                slnSpaceGraph->addEdge(flipB, k, w);
+                addedEdge = true;                    
+            }
+            if (flipBoth.size() > 0) {
+                double w = 1.0;
+                slnSpaceGraph->addEdge(flipBoth, k, w);
+                addedEdge = true;                    
+            }
+            return addedEdge;
+          }
+
+
 
             std::vector< FlipKeyVec > iterKeys;
             std::vector< FlipKey > none;
@@ -520,12 +622,16 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
             if (isInternal(U)) {
                 if ( LU > RU ) { std::swap(LU, RU); }
 
-                if (not differentExtantNetworks(ti, LU, V) && !(isLost(LU) || isLost(V))) {
+                if (Utils::Trees::sameSpecies(t, LU, V) and
+                    //not differentExtantNetworks(ti, LU, V) and 
+                    !(isLost(LU) || isLost(V))) {
                     iterKeys.push_back( {FlipKey(LU, V, FlipState::both), 
                                            FlipKey(LU, V, FlipState::none)} ); 
                 }
 
-                if ( not differentExtantNetworks(ti, RU, V) && !(isLost(RU) || isLost(V))) {
+                if (Utils::Trees::sameSpecies(t, RU, V) and
+                    //not differentExtantNetworks(ti, RU, V) and 
+                    !(isLost(RU) || isLost(V))) {
                     iterKeys.push_back( {FlipKey(RU, V, FlipState::both), 
                                            FlipKey(RU, V, FlipState::none)} ); 
                 }
@@ -546,12 +652,16 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
             if ( isInternal(V) ) {
                 if ( LV > RV ) { std::swap(LV, RV); }
 
-                if (not differentExtantNetworks(ti, LV, U) && !(isLost(LV) || isLost(U))) {
+                if (Utils::Trees::sameSpecies(t, U, LV) and
+                    //not differentExtantNetworks(ti, LV, U) and
+                    !(isLost(LV) || isLost(U))) {
                     iterKeys.push_back( {FlipKey(U, LV, FlipState::both),
                                            FlipKey(U, LV, FlipState::none)});
                 }
 
-                if (not differentExtantNetworks(ti, RV, U) && !(isLost(RV) || isLost(U))) {
+                if (Utils::Trees::sameSpecies(t, U, RV) and
+                    //not differentExtantNetworks(ti, RV, U) and
+                    !(isLost(RV) || isLost(U))) {
                     iterKeys.push_back( {FlipKey(U, RV, FlipState::both),
                                         FlipKey(U, RV, FlipState::none)});
                 }
@@ -559,6 +669,8 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
             }
             addCartesianProduct(iterKeys, none, edgeAlwaysOk);
         }
+
+        return true;
     };
 
     // Add the nodes to the hypergraph
@@ -579,12 +691,14 @@ unique_ptr<ForwardHypergraph>  buildMLSolutionSpaceGraph(
         for ( vit = uit; vit != tend; ++vit ) {
             int v = *vit;
 
-            // Add the pair if they meet the following conditions
-            if ( ( (u == v) && !isLost(u) ) || // they are the same node (self-loop)
-                 (!differentExtantNetworks(ti, u, v) && // they have progeny in the same species
-                 !(ti.inSubnodesOf(u, v) ||  ti.inSubnodesOf(v, u)) && // neither is a progeny of the other
-                 !(isLost(u) || isLost(v)) )) { // neither of them is lost
-                
+            if ( ((u == v) and !isLost(u)) or // they are the same node (self-loop)
+                 (Utils::Trees::sameSpecies(t, u, v) and // they are in the same species
+                  //!differentExtantNetworks(ti, u, v) and
+                  !ti.inSubnodesOf(u, v) and // neither is a descendant of the other
+                  !ti.inSubnodesOf(v, u) and  // neither is a descendant of the other
+                  !(isLost(u) or isLost(v))) // neither is lost
+                ) {
+
                 //if (ti.intervalDistance(u, v) > 0.0) { continue; }
 
                 // Add a vertex representing no edge between them
@@ -707,7 +821,6 @@ void MLLeafCostDict(
     for ( auto v = boost::vertices(G).first; v != boost::vertices(G).second; ++ v ) {
         idToVertMap[ G[*v].idx ] = *v;
     }
-    //cerr << "ID TO VERTEX MAP SIZE = " << idToVertMap.size() << "\n";
     size_t nlost = 0;
     size_t nef = 0;
     double tweight = 0.0;
@@ -722,8 +835,7 @@ void MLLeafCostDict(
         auto uIsLeaf = isLeaf(nd.u());
         auto vIsLeaf = isLeaf(nd.v());
     
-        // Debug checks
-        /*
+        // Debug checks        
         if (not (uIsLeaf or vIsLeaf)) {
             std::cerr << "in the node: " << Utils::stringForKey(H->vertex(n), T) << "\n";
             if (not uIsLeaf) {
@@ -735,11 +847,11 @@ void MLLeafCostDict(
             std::cerr << "\n";
         }
 
-        if ( differentExtantNetworks(ti, nd.u(), nd.v()) ) {
+        if ( !Utils::Trees::sameSpecies(ti.tree, nd.u(), nd.v()) ) {
             std::cerr << "skipping " << Utils::stringForKey(H->vertex(n), T) << "\n";
             continue;
         }
-        */
+        
    
         // Check to see if u, v, or both have been lost
         auto endOfMap = idToVertMap.end();
@@ -760,7 +872,7 @@ void MLLeafCostDict(
 
         // The cost to / between lost nodes is always 0
         if ( lostU || lostV ) {
-            //double lostCost = ( nd.state() == FlipState::none ) ? 0.91 : 0.09;
+            //double lostCost = ( nd.state() == FlipState::none ) ? 0.99 : 0.01;
             auto lostCost = 0.5;
             vector<size_t> ev;
             Google<Derivation::flipT>::Set es;
@@ -785,7 +897,7 @@ void MLLeafCostDict(
                 if ( undirected ) {
                     assert( w_f == w_r );
                 }
-                auto cost = (d_f == nd.f() and d_r == nd.r()) ? 1.0 : 0.0;
+                auto cost = (d_f == nd.f() and d_r == nd.r()) ? 2.0 : 0.0;
                 Google<Derivation::flipT>::Set effectiveEdges;
                 effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
                 vector<size_t> ev;
@@ -797,7 +909,7 @@ void MLLeafCostDict(
                 tie(e, hasSelfLoop) = edge(u, v, G);
                 double w_l = hasSelfLoop ? G[e].weight : 0.0;
 
-                auto cost = ( nd.f() == hasSelfLoop ) ? 1.0 : 0.0;
+                auto cost = ( nd.f() == hasSelfLoop ) ? 2.0 : 0.0;
                 Google<Derivation::flipT>::Set effectiveEdges;
                 effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
                 vector<size_t> ev;
@@ -836,6 +948,7 @@ double computeVertexProbability(const size_t &vid,
     if ( incomingEdges.size() == 0 ) { return probs[vid]; }
 
     auto parentVertex = H->vertex(vid);
+    double prior = model.priorProbability(parentVertex.state());
     double prob = 0.0;
     size_t k = 0;
 
@@ -851,11 +964,10 @@ double computeVertexProbability(const size_t &vid,
         for (auto tid : edge.tail()) {
             auto childVertex = H->vertex(tid);
             //assert( normed[tid] );
-
-            auto transProb = probs[tid] * model.transitionProbability( childVertex, parentVertex );
+            auto transProb = prior * model.transitionProbability( childVertex, parentVertex ) * probs[tid];
             tprob *= transProb;
         }
-
+        
         prob += tprob;
     }
 
@@ -872,27 +984,19 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
                     const string &outputName,
                     const vector<size_t> &outputKeys ) {
 
-    // Compute the *weighted* probability of each edge being in
-    // the top k distinct scoring solutions
     cpplog::FileLogger log( "log.txt", true );
 
     size_t maxID = *(std::max_element(order.begin(), order.end()));
-
-    // Dictionary that holds the top-k cost classes for each
-    // vertex, as well as other relevant information
-    vector< vector<CostClassT> > tkd(maxID + 1, vector<CostClassT>() ); //unordered_map< size_t, vector<CostClass> > tkd;
 
     /**
     * Dictionary that holds the probability of each state for each vertex
     */
     typedef double LogProbT;
     vector< LogProbT > probs( maxID + 1, 0.0 );
-    // true for each vertex whose probability has been normalized, false for all others
+    // true for each vertex whose probability has been normalized (marginalized), false for all others
     boost::dynamic_bitset<> normed( maxID + 1 );
 
-    double costsum = 0.0;
-
-    // Each leaf has a single solution which is, by definition, of optimal cost
+    // The likelihood (and probability) of each leaf is given
     for ( const auto & vit : order ) {
         if ( H->isLeaf(vit) ) {
             probs[vit] = slnDict[vit][0].cost;
@@ -924,7 +1028,8 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
     // For each vertex, in topological order (up)
     for ( auto vit = order.begin(); vit != order.end(); ++vit, ++ctr, ++showProgress ) {
 
-        /*
+        // Ensure that all of the children of the current vertex
+        // have been marginalized.
          for ( auto e : H->incident(*vit) ) {
             auto edge = H->edge(e);
             for ( auto v : edge.tail() ) {
@@ -932,51 +1037,56 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
                
                auto opKey = flipBoth(key);
                auto opInd = H->index(opKey);
-               
-               if ( !H->isLeaf(v) ) {
 
                 auto states = {v, opInd};
+
+                // Either both the vertex and its opposite state
+                // should have been normalized or neither of them.
+                if (normed[v] != normed[opInd]) {
+                    std::cerr << "Error: One of the states has been normalized but the other hasn't!\n";
+                    std::exit(1);
+                }
+                // If the state's have already been normalized, no need
+                // to do it again
+                if (normed[v] and normed[opInd]) { continue; }
+
+                // The total likelihood for all states of this edge
                 double probSum = 0.0;
                 for ( auto s : states ) { probSum += probs[s]; }                
-                if ( ! (probSum > 0) ) {
+                
+                // The total likelihood should be non-zero
+                if (!(probSum > 0)) {
                     for ( auto s : states ) {
-                        if ( H->incident( opInd ).size() > 0 ) {
-                            std::cerr << "P("; printWithNames( s ); std::cerr << ") = " << probs[s] << "\n";
+                        auto pkey = H->vertex(s);
+                        if ( H->incident(s).size() > 0 ) {
+                            std::cerr << "P(" << Utils::stringForKey(pkey, t) << ") = " << probs[s] << "\n";
                         }
                     }
-                    //std::abort();
                  }
-                 if ( probSum > 0 ) {
+
+                 // Now, marginalize likelihoods to get marginal probabilities for 
+                 // the different states of this potential edge
+                 if (probSum > 0) {
                     for ( auto s : states ){ 
                         probs[s] /= probSum;
+                        normed[s] = 1;
                     }
-                    //probs[v] /= probSum;
-                    //probs[opInd] /= probSum;
-                    //assert( probs[v] + probs[opInd] > 0.99 && probs[v] + probs[opInd] < 1.01 );
+                    // Ensure that the sum of marginals is 1
                     auto tmpSum = 0.0;
                     for ( auto s : states ) { tmpSum += probs[s]; }
-                    assert( tmpSum > 0.99 && tmpSum < 1.01 );
-                    
+                    if (tmpSum < 0.99 || tmpSum > 1.01) {
+                        std::cerr << "Probability was supposed to be normalized but is " << tmpSum << "\n";
+                    }
                  }
-                 //normed[v] = true; normed[opInd] = true;
-                 for ( auto s : states ) { normed[s] = 1; }
-               }
            }
         } 
-        */
-       
-        auto vert = H->vertex(*vit);
+
+        // Now that the children have all been marginalized, compute the likelihood
+        // of the parent
         auto probVert = computeVertexProbability(*vit, t, probs, normed, H, model);
         probs[ *vit ] = probVert;
-
     } // loop over verts
 
-    typedef Google< size_t, double >::Map probMapT;
-    size_t invalidIdx = std::numeric_limits<size_t>::max();
-    probMapT probMap;
-    probMapT outProbMap;
-    probMap.set_empty_key( invalidIdx );
-    outProbMap.set_empty_key( invalidIdx );
 
     // Map from a vertex to the maximum cost class that is
     // considered in deriving any solution that is actually used.
@@ -985,42 +1095,10 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
 
     ctr = 0;
     size_t tot = order.size();
-    auto rootFlip = flipBoth(rootKey);
-    H->addVertex( rootFlip );
-    auto rootIdNoFlip = H->index(rootKey);
-    auto rootIdFlip = H->index(rootFlip);
-
-    cerr << "Down phase\n";
-    showProgress.restart(order.size());
-
-    std::vector<LogProbT> outProbs( probs.size(), 0.0 );
-
-    // Compute the probabilities (down)
-    // Loop over all vertices in *reverse* topological order
-    for ( auto vit = order.rbegin(); vit != order.rend(); ++vit, ++ctr, ++showProgress ) {
-        if( !normed[*vit] ) {
-            auto k = H->vertex(*vit);
-            /*
-            std::cerr << "key ";
-            printWithNames(*vit);
-            std::cerr << " is not normed!!\n";
-            std::abort();
-            */
-        }
-        /*
-        // for all incoming edges contributing to this cost class
-        for ( const auto & e : H->incident(*vit) ) {
-          // What is the action along edge 'e' (i.e. how is
-          // the state of the interaction function different
-          // between *vit and the tail nodes of e)
-          auto tail = H->edge(e).tail();
-          auto ft = flipType( H->vertex(*vit), H->vertex(tail[0]) );
-          auto outKey = keyForAction( H->vertex(*vit), ft );
-          auto outInd = H->index(outKey);
-          outProbs[outInd] += probs[*vit];
-        }
-        */
-    }
+    // auto rootFlip = flipBoth(rootKey);
+    // H->addVertex( rootFlip );
+    // auto rootIdNoFlip = H->index(rootKey);
+    // auto rootIdFlip = H->index(rootFlip);
 
     bool restrictOutput = false;
     std::vector<size_t> outputInds;
@@ -1043,14 +1121,13 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
         auto opKey = flipBoth(H->vertex(vid));
         auto opInd = H->index(opKey);
         auto approxProb = probs[vid];
-        auto approxOtherProb = probs[ H->index(opKey) ];
+        //auto approxOtherProb = probs[ H->index(opKey) ];
         
-        if ( (approxProb + approxOtherProb < 0.99 || approxProb + approxOtherProb > 1.01) and
-             (t->isLeaf(key.u()) and t->isLeaf(key.v())) ) {
-            std::cerr << "key = "; Utils::stringForKey(key, t); std::cerr << ", P(key) = " << approxProb << "\n";
-            std::cerr << "okey = "; Utils::stringForKey(opKey, t); std::cerr << ", P(okey) = " << approxOtherProb << "\n";
-            //std::abort();
-        }
+        //if ((approxProb + approxOtherProb < 0.99 || approxProb + approxOtherProb > 1.01)) {
+        //    std::cerr << "key = " << Utils::stringForKey(key, t) << ", P(key) = " << approxProb << "\n";
+        //    std::cerr << "okey = " << Utils::stringForKey(opKey, t) << ", P(okey) = " << approxOtherProb << "\n";
+        //
+        //}
         
         bool writeOut = true;
 
@@ -1070,6 +1147,9 @@ void probabilistic( unique_ptr<ForwardHypergraph> &H,
 /* =============== END MAXIMUM LIKELIHOOD ================== */
 
 
+
+
+/* =============== BEGIN PARSIMONY ================== */
 
 /**
  *  Add the appropriate hypervertices representing states
@@ -1128,25 +1208,31 @@ void addHyperNodeAmbiguous (
 
 /**
 * This function builds the hypergraph structure from the dynamic programming recurrences.
+* @param t   A pointer to the phylogenetic tree
+* @param ti  A reference to the TreeInfo object for this tree
+* @param pc  A ParsimonyCost object representing the costs for different events
+* @param penalty  The penalty that should be applied for edge events occuring between 
+*                 non-co-existant proteins
+* @param dtype  The type of derivations that should be allowed (all derivations, or only non-ambiguous ones)
+* @return A unique_ptr to the constructed hypergraph
 **/
 unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( 
     const TreePtrT &t,
     const TreeInfo &ti,
-    double cc,
-    double dc,
+    const ParsimonyCosts& pc,
     double penalty,
-    bool directed,
     MultiOpt::DerivationType dtype ) {
 
-    typedef std::function<bool(const FlipKey&)> AddHyperEdgeFuncT;
+    using AddHyperEdgeFuncT = std::function<bool(const FlipKey&)>;
 
     cpplog::FileLogger log( "log.txt", true );
-
     boost::timer::auto_cpu_timer timer("Building Hypergraph [%ws wall, %us user + %ss system = %ts CPU (%p%)]\n");
 
+    bool directed = pc.isDirected();
     std::unordered_set<int> leafIDs;
     std::unordered_set<int> lostIDs;
 
+    // For quicker access later, record the ids of all lost nodes and leaf nodes
     for ( auto lid : t->getLeavesId() ) {
         if ( t->getNodeName(lid).find("LOST") != std::string::npos ) {
             lostIDs.insert(lid);
@@ -1154,9 +1240,10 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
         leafIDs.insert(lid);
     }
 
+    // Some convenience functions to test properites of nodes
     auto isLeaf = [&]( const int & nid ) -> bool { return leafIDs.find(nid) != leafIDs.end(); };
     auto isInternal = [&]( const int & nid ) -> bool { return !isLeaf(nid); };
-    auto isLost = [&]( int nid ) -> bool { return lostIDs.find(nid) != lostIDs.end(); }; //return (t->getNodeName(nid)).find("LOST") != std::string::npos; };
+    auto isLost = [&]( int nid ) -> bool { return lostIDs.find(nid) != lostIDs.end(); };
 
     auto rootId = t->getRootId();
     auto rootName = t->getNodeName( rootId );
@@ -1167,20 +1254,27 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
     unique_ptr<ForwardHypergraph> slnSpaceGraph( new ForwardHypergraph() );
 
     // The cost of transitions between different states and self-loops
-    costMapT costMap( getCostDict(cc, dc, directed) );
-    selfCostMapT selfLoopCostMap( getSelfLoopCostDict(cc, dc, directed) );
+    // with the new ParsimonyCosts class, these are deprecated and should
+    // be phased out.
+    double cc = 1.2;
+    double dc = 1.0;
+
+    // Get the costs for different events relating to protein duplication
+    // and speciation.
+    const costMapT& costMap = pc.getCostDict();
+    const costMapT& specCostMap = pc.getSpecCostDict();
 
     /**
-    * A term (hypervertex) is valid if neither u nor v is lost and the extant
-    * networks descending from u and v overlap.
+    * A term (hypervertex) is valid if neither u nor v is lost 
+    * and u and v are in the same species.
     */
     auto isValidTerm = [&]( const FlipKey& fk ) -> bool {
-        return (!differentExtantNetworks(ti, fk.u(), fk.v()) && !(isLost(fk.u()) || isLost(fk.v())));
+        return (Utils::Trees::sameSpecies(t, fk.u(), fk.v()) and !(isLost(fk.u()) || isLost(fk.v())));
     };
 
     /**
     * Convenience function that performs the same test as 'isValidTerm' but which takes
-    * a vector of node ids (assumed of length >=2) instead of a FlipKey.
+    * a vector of node ids (assumed of length 2) instead of a FlipKey.
     */
     auto isInvalidPair = [&]( const std::vector<int>& uv ) -> bool {
         return (differentExtantNetworks(ti, uv[0], uv[1]) || isLost(uv[0]) || isLost(uv[1]));
@@ -1194,6 +1288,11 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
     */
     auto flipIsValid = [&]( const FlipKey& parent, FlipState cs ) {
         auto ps = parent.state();
+        auto us = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.u(),"S") )->toSTL();
+        auto vs = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.v(),"S") )->toSTL();
+        if (us != vs) {
+            std::cerr << "considering an inter-species edge!\n";
+        }
         if ( ps != cs ) {
             auto us = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.u(),"S") )->toSTL();
             auto vs = dynamic_cast<bpp::BppString*>( t->getNodeProperty(parent.v(),"S") )->toSTL();
@@ -1215,7 +1314,7 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
     */
     auto printKey = [&]( const FlipKey& k ) -> void {
         std::cerr << "{ " << t->getNodeName(k.u()) << ", " << t->getNodeName(k.v()) << ", (" <<
-            k.f() << ", " << k.r() << ")} ( " << k.connectU() << ", " << k.connectV() << ")\n";
+            k.f() << ", " << k.r() << ")} ";
     };
 
     /**
@@ -1238,391 +1337,471 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
         }
     };
 
-    /**
-    * Adds the appropriate incoming hyperedges to the hypervertex 'k'.
-    */
-    AddHyperEdgeFuncT addIncomingHyperedgeUnambiguous = [ = , &costMap, &selfLoopCostMap, &slnSpaceGraph, &penalty, &t] (
-        const FlipKey & k //!< The vertex to which we'll add the incoming edges
-        ) -> bool {
+    // A binding for this function needs to be available, but the "unambiguous" derivation
+    // code is on the backburner at the moment to simplifiy development and clean-up 
+    // of the other stuff.
+    AddHyperEdgeFuncT addIncomingHyperedgeUnambiguous = []( const FlipKey & k ) -> bool { return false; };
+
+    // //
+    // //  BEGIN TESTING
+    // //  Testing effect of ambiguity of derivation (not currently necessary).
+    // //
+    // //
+
+
+    // /**
+    // * Adds the appropriate incoming hyperedges to the hypervertex 'k'.
+    // */
+    // AddHyperEdgeFuncT addIncomingHyperedgeUnambiguous = [ = , &costMap, &selfLoopCostMap, &slnSpaceGraph, &penalty, &t] (
+    //     const FlipKey & k //!< The vertex to which we'll add the incoming edges
+    //     ) -> bool {
         
-        /**
-        * Adds all possible (and valid) combinations of edges defined by 
-        * the hypervertex set 'targetNodes' and the connectOptions set 'connectOptions'
-        * to the with a head hypervertex of 'k'.
-        */
-        auto addPossibleEdges = [&]( 
-            std::vector< std::vector<int> >& targetNodes, 
-            std::vector< MustConnect >& connectOptions, 
-            const FlipKey& k,
-            FlipState fs,
-            double cost, 
+    //     /**
+    //     * Adds all possible (and valid) combinations of edges defined by 
+    //     * the hypervertex set 'targetNodes' and the connectOptions set 'connectOptions'
+    //     * to the with a head hypervertex of 'k'.
+    //     */
+    //     auto addPossibleEdges = [&]( 
+    //         std::vector< std::vector<int> >& targetNodes, 
+    //         std::vector< MustConnect >& connectOptions, 
+    //         const FlipKey& k,
+    //         FlipState fs,
+    //         double cost, 
+    //         std::function<bool(std::vector<FlipKey>&)>& acceptEdge ) -> bool {
+
+    //         using boost::next_partial_permutation;
+            
+    //         bool added{false};
+
+    //         try {
+    //             // If we're trying to perform a flip (the flip state of the parent and potential
+    //             // children is different) but the parent nodes are in different species, then none
+    //             // of the potential edges is valid
+    //             if ( !flipIsValid(k, fs) ) { return false; }
+
+    //             // Remove any invalid vertices in the tail (i.e. vertices whose constituent nodes
+    //             // are lost or are in different extant networks.).
+    //             auto newEnd = std::remove_if(targetNodes.begin(), targetNodes.end(), isInvalidPair);
+    //             targetNodes.erase(newEnd, targetNodes.end());
+    //             if (targetNodes.size() == 0) { return false; } //std::cerr << "invalid edge\n"; return false;}
+                
+    //             int numConnectOptions = connectOptions.size();
+    //             int numTargets = targetNodes.size();
+
+    //             std::vector<size_t> inds;
+    //             inds.reserve( numConnectOptions * numTargets );
+
+    //             for( auto i : boost::irange(0, numConnectOptions) ) {
+    //                 for( auto j : boost::irange(0, numTargets) ) { inds.push_back(i); }
+    //             }
+
+    //             std::vector< FlipKey > edge;
+    //             edge.reserve(numTargets);
+
+    //             std::unordered_set< std::string > uniqueEdges;
+
+    //             size_t numAdded = 0;
+    //             do {
+
+    //               // Build up each possible edge by pairing all of the target nodes with
+    //               // each permutation of connect states
+    //               for( auto tn : boost::irange(0,numTargets) ) {  // Build "edge"
+
+    //                 // The pair (u,v) is a current tail node of "edge"
+    //                 auto u = targetNodes[tn][0]; auto v = targetNodes[tn][1];                    
+    //                 // The connect state we'll assign to (u,v)                    
+    //                 auto mustConnect = connectOptions[inds[tn]];
+    //                 assert(u<=v);
+    //                 if ( u > v ) { std::cerr << "swapping\n"; std::swap(u,v); swapEndpoints(mustConnect); }
+
+    //                 // The actual key representing this tail node of "edge".
+    //                 FlipKey fk( u, v, fs, mustConnect);
+                    
+    //                 // If the connect state is valid, then add this node to the edge, otherwise
+    //                 // this edge does not represent a valid recurrence, so skip it.
+    //                 if ( validConnectState(u,v,mustConnect) ) { 
+    //                     edge.push_back(fk);
+    //                 } else {
+    //                     edge.clear(); break;
+    //                 }
+
+    //               }
+
+    //               if ( acceptEdge(edge) ) {
+    //                   added = true;
+    //                   numAdded += 1;
+    //                   slnSpaceGraph->addEdge( edge, k, cost );
+    //               }              
+    //               edge.clear();
+
+    //             } while ( next_partial_permutation( inds.begin(), inds.begin()+numTargets, inds.end() ) );
+                  
+    //        } catch ( FlipKey& fk ) {
+
+    //             std::cerr << "Error adding edge; couldn't find node : ";
+    //             std::cerr << "{ " << t->getNodeName(fk.u()) << ", " << t->getNodeName(fk.v()) << ", (" <<
+    //                 fk.f() << ", " << fk.r() << ") } (" << 
+    //                 fk.connectU() << ", " << fk.connectV() << "), ";
+
+    //        } catch ( ... ) {
+    //          std::cerr << "failed to add an edge!\n";
+    //        }
+    //        return added;
+    //     };    
+
+    //     bool addedEdge{false};
+
+    //     auto f = k.f(); auto r = k.r();        
+    //     auto state = k.state();
+    //     auto flippedState = fsBoth[state];
+
+    //     MustConnect mustConnect{ k.mustConnect() };
+
+    //     bool connectU{k.connectU()};
+    //     bool connectV{k.connectV()};
+
+    //     const int U = k.u();
+    //     const int V = k.v();
+    //     auto UIsInternal = isInternal(U);
+    //     auto VIsInternal = isInternal(V);
+
+    //     int LU, RU, LV, RV;
+    //     LU = RU = LV = RV = -1;
+
+    //     if ( UIsInternal ) { 
+    //         auto sons = t->getSonsId(U);
+    //         assert(sons.size() == 2);
+    //         LU = sons[0]; RU = sons[1]; 
+    //         if ( LU > RU ) { std::swap(LU,RU); }
+    //     }
+    //     if ( VIsInternal ) { 
+    //         auto sons = t->getSonsId(V);
+    //         assert(sons.size() == 2);
+    //         LV = sons[0]; RV = sons[1]; 
+    //         if ( LV > RV ) { std::swap(LV,RV); }
+    //     }
+
+    //     // Handle the case where this vertex denotes a self loop
+    //     if (k.arity() == 1) {
+
+    //         // There are only incoming edges to add if this vertex isn't a leaf
+    //         if (isInternal(U)) {
+
+    //             std::vector< MustConnect > lrStates = { 
+    //                 MustConnect::none, MustConnect::both, MustConnect::right, MustConnect::left
+    //             };
+
+    //             // 1 -- we don't flip the self-loop
+    //             assert( mustConnect == MustConnect::none );
+    //             auto noFlipLU = FlipKey( LU, LU, state, mustConnect );
+    //             auto noFlipRU = FlipKey( RU, RU, state, mustConnect );
+    //             // 2 -- we flip the self loop
+    //             auto dualFlipLU = flipBoth( noFlipLU );
+    //             auto dualFlipRU = flipBoth( noFlipRU );
+
+    //             vector<FlipKey> noFlipEdge = vector<FlipKey>();
+    //             vector<FlipKey> dualFlipEdge = vector<FlipKey>();
+
+    //             bool empty{true};
+    //             // we can only recurse into U if it's not lost
+    //             if ( !isLost(LU) ) {
+    //                 noFlipEdge.push_back( noFlipLU );
+    //                 dualFlipEdge.push_back( dualFlipLU );
+    //                 empty = false;
+    //             }
+    //             // same with V
+    //             if ( !isLost(RU) ) {
+    //                 noFlipEdge.push_back( noFlipRU );
+    //                 dualFlipEdge.push_back( dualFlipRU );
+    //                 empty = false;
+    //             }
+
+    //             // We only consider the state between U & V if they are part of the same
+    //             // extant network and neither is lost
+    //             if ( !differentExtantNetworks(ti, LU, RU) and !(isLost(LU) or isLost(RU)) ) {
+
+    //                 // Pair up the homodimer vertices with each of the possible connect states 
+    //                 // of the heterodimer vertices
+    //                 for ( auto& cstate : lrStates ) {
+
+    //                     if ( validConnectState(LU, RU, cstate) ) {
+    //                         noFlipEdge.push_back( FlipKey(LU, RU, state, cstate ));
+    //                         slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
+
+    //                         auto ckey = FlipKey(LU, RU, flippedState, cstate );
+                            
+    //                         // if ( isValidTransition(k, ckey) ) { 
+    //                         // DON'T NEED THIS TEST HERE; The same node should ALWAYS be from the same species
+                            
+    //                         dualFlipEdge.push_back( ckey );
+    //                         auto w = round3(get<0>(selfLoopCostMap[ k.state() ][ (!f || !r) ]));
+    //                         w = existencePenalty(ti, k, penalty, w);
+
+    //                         if ( std::isfinite(w) ) {
+    //                             addedEdge = true;
+    //                             slnSpaceGraph->addEdge( dualFlipEdge, k, w );
+    //                         }
+
+    //                         // get rid of the heterodimer so we can make the next edge
+    //                         noFlipEdge.pop_back();
+    //                         dualFlipEdge.pop_back();
+    //                     }
+    //                 }
+
+    //             } else if ( !empty ) { // If we don't need to consider edges between LU & RU
+    //                 slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
+
+    //                 auto w = round3(get<0>(selfLoopCostMap[ k.state() ][ (!f || !r) ]));
+    //                 w = existencePenalty(ti, k, penalty, w);
+    //                 if ( std::isfinite(w) ) {
+    //                     addedEdge = true;
+    //                     slnSpaceGraph->addEdge( dualFlipEdge, k, w );
+    //                 }
+    //             }
+
+    //         }
+
+    //     } else { // if U and V are different --- this isn't a self-loop
+
+    //       typedef std::vector<FlipKey> EdgeTail;
+    //       typedef std::function<bool(EdgeTail&)> CheckEdgeFunction;
+            
+    //       // Don't filter any extra edges
+    //       CheckEdgeFunction edgeAlwaysOk = [&] ( std::vector< FlipKey >& edge ) -> bool { 
+    //         return edge.size() > 0;
+    //       };
+            
+    //       // For at least one flip key in this edge, the state of connectU is true
+    //       CheckEdgeFunction childrenMustConnectU = [&] ( std::vector< FlipKey >& edge ) -> bool {
+    //         if ( edge.size() > 0 ) {
+    //             for ( auto& k : edge ){
+    //                 if ( k.connectU() ) { return true; }
+    //             }
+    //         }
+    //         return false;
+    //       };
+
+    //     // For at least one flip key in this edge, the state of connectV is true
+    //     CheckEdgeFunction childrenMustConnectV = [&] ( std::vector< FlipKey >& edge ) -> bool { 
+    //         if ( edge.size() > 0 ) {
+    //             for ( auto& k : edge ){
+    //                 if ( k.connectV() ) { return true; }
+    //             }
+    //         }
+    //         return false;
+    //     };            
+
+    //     if ( mustConnect == MustConnect::both ) {
+    //       if ( UIsInternal or VIsInternal ) {
+            
+    //         // Since connectU  and connectV are both true, then something
+    //         // must flip the state to U and something must flip the state to V.
+    //         // The only way this is possible without creating a blocking loop is by 
+    //         // flipping {U,V}.  Thus, we consider all possible ways of recursing
+    //         // on U and V, but we only consider recursions where we flip the state
+    //         // of the interaction.
+            
+    //         // The nodes into which we'll recurse
+    //         std::vector< std::vector<int> > targetNodes;
+    //         // The set of connect options we'll allow in these nodes
+    //         std::vector< MustConnect > connectOptions{ 
+    //             MustConnect::none, MustConnect::left, MustConnect::right, MustConnect::both 
+    //         }; 
+
+
+    //         // The cost of performing the flip
+    //         auto w = round3(get<0>(costMap[ state ][ flippedState ]));
+    //         w = existencePenalty(ti, k, penalty, w);
+
+    //         // If both U and V are internal we consider the cases of recursing into both
+    //         // of them simultaneously.  Any path which takes one of these edges will consider
+    //         // no further flips to U or V.
+    //         if ( UIsInternal and VIsInternal ) { 
+    //             targetNodes = { {LU,LV}, {LU,RV}, {RU,LV}, {RU,RV} };
+    //             assert( LU <= LV ); assert( LU <= RV );
+    //             assert( RU <= LV ); assert( RU <= RV );
+    //             addedEdge |= addPossibleEdges( targetNodes, connectOptions, k,  flippedState, w, edgeAlwaysOk );
+    //         }
+
+    //         // If V is internal, then we can recurse into its children.  However,
+    //         // to avoid ambiguity, we will only consider the cases where a descendant of V
+    //         // still flips the state to U (otherwise, we only consider recursing on both
+    //         // which is handled above).
+    //         if ( VIsInternal ) {
+    //            targetNodes = { {U,LV}, {U,RV} };
+    //            assert(U <= LV); assert(U <= RV);
+    //            addedEdge |= addPossibleEdges( targetNodes, connectOptions, k, flippedState, w, childrenMustConnectU );
+    //         }
+
+    //         // If U is internal, then we can recurse into its children.  However,
+    //         // to avoid ambiguity, we will only consider the cases where a descendant of U
+    //         // still flips the state to V (otherwise, we only consider recursing on both
+    //         // which is handled above).
+    //         if ( UIsInternal ) {
+    //             targetNodes = { {LU,V}, {RU,V} };
+    //             assert(LU <= V); assert(RU <= V);
+    //             addedEdge |= addPossibleEdges( targetNodes, connectOptions, k, flippedState, w, childrenMustConnectV );
+    //         }
+
+    //     } 
+    // } else if ( mustConnect == MustConnect::left ) {
+        
+    //     // Since connectV is 0, we *can not* flip {U,V}, but _something_ beneath V *must* still 
+    //     // flip the state to U.
+    //     // This implies that we only consider recursing on V and recursing without flipping.
+    //     // Also, since something beneath V must still flip the state to U, we only consider
+    //     // recursing to nodes with the flip state {1,0} or {1,1}
+        
+    //     if ( VIsInternal ) { // If we can't recurse on V then we're hosed
+    //        assert(U < LV);
+    //        assert(U < RV);
+    //        std::vector< std::vector<int> > targetNodes{ {U,LV}, {U,RV} };
+    //        std::vector< MustConnect > connectOptions{ 
+    //         MustConnect::both, MustConnect::left, MustConnect::right, MustConnect::none 
+    //        };
+    //        addedEdge = addPossibleEdges( targetNodes, connectOptions, k, state, 0.0, childrenMustConnectU );
+    //     } else { 
+    //         std::cerr << "ERROR\n";
+    //         std::abort();
+    //     }                
+
+    // } else if ( mustConnect == MustConnect::right ) {
+        
+    //     // Since connectU is 0, we *can not* flip {U,V}, but _something_ beneath U *must* still 
+    //     // flip the state to V.
+    //     // This implies that we only consider recursing on U and recursing without flipping.
+    //     // Also, since something beneath U must still flip the state to V, we only consider
+    //     // recursing to nodes with the flip state {0,1} or {1,1}
+
+    //     if ( UIsInternal ) { // If we can't recurse on U then we're hosed
+    //         assert(LU < V);
+    //         assert(RU < V);
+    //         std::vector< std::vector<int> > targetNodes = { {LU,V}, {RU,V} };
+    //         std::vector< MustConnect > connectOptions{ 
+    //             MustConnect::both, MustConnect::left, MustConnect::right, MustConnect::none 
+    //         };
+            
+    //         addedEdge = addPossibleEdges( targetNodes, connectOptions, k, state, 0.0, childrenMustConnectV );
+    //     } else { 
+    //         std::cerr << "ERROR\n";
+    //         std::abort();
+    //     }
+
+    // } else if ( mustConnect == MustConnect::none ) {
+    //     // If neither node is internal, then we can't recurse at all
+    //     if ( UIsInternal or VIsInternal )  {
+
+    //         // We're not allowed to change the state to U or V, so we must not flip.
+
+    //         // The nodes into which we'll recurse
+    //         std::vector< std::vector<int> > targetNodes;
+    //         // The set of connect options we'll allow in these nodes
+    //         std::vector< MustConnect > connectOptions;
+            
+    //         // If both U and V are internal
+    //         if ( UIsInternal and VIsInternal ) { 
+    //             targetNodes = { {LU,LV}, {LU,RV}, {RU,LV}, {RU,RV} };
+    //             connectOptions = { MustConnect::both, MustConnect::left, MustConnect::right, MustConnect::none };
+    //         } else
+
+    //         // If U is a leaf, then the connect state of the childern must be {0,0}
+    //         // since there is nothing below U to connect to V and since the connect
+    //         // state at U,V is {0,0}, nothing below V is allowed to connect to U.
+    //         if ( (!UIsInternal) and VIsInternal) {
+    //             targetNodes = { {U,LV}, {U,RV} };
+    //             connectOptions = { MustConnect::none };
+    //         } else
+
+    //         // If V is a leaf, the same argument as above applies and the connect stae
+    //         // of all children must be {0,0}.
+    //         if ( UIsInternal and (!VIsInternal) ) {
+    //             targetNodes = { {LU,V}, {RU,V} };
+    //             connectOptions = { MustConnect::none };                  
+    //         }
+    //         addedEdge = addPossibleEdges( targetNodes, connectOptions, k, state, 0.0, edgeAlwaysOk );            
+    //     }
+
+    // }
+    //     }
+    //     return addedEdge;
+    // };
+
+    // //
+    // //  END AMBIGUITY TESTING
+    // //
+
+/**
+    * Adds the appropriate incoming hyperedges to the hypervertex 'k', assuming that we allow
+    * for "ambiguous" derivations.
+    */
+    AddHyperEdgeFuncT addIncomingHyperedgeAmbiguous = [=, 
+        &costMap,
+        &specCostMap, 
+        &slnSpaceGraph, 
+        &penalty, 
+        &t] ( 
+              const FlipKey & k //!< The vertex to which we'll add the incoming edges
+            ) -> bool {
+
+            using FlipKeyVec = std::vector<FlipKey>;
+
+            auto addCartesianProduct = [&] ( 
+            std::vector<FlipKeyVec> &iterKeys, 
+            std::vector<FlipKey> &fixedKeys,
+            const costMapT& pcosts,
             std::function<bool(std::vector<FlipKey>&)>& acceptEdge ) -> bool {
 
-            using boost::next_partial_permutation;
-            
-            bool added{false};
-
-            try {
-                // If we're trying to perform a flip (the flip state of the parent and potential
-                // children is different) but the parent nodes are in different species, then none
-                // of the potential edges is valid
-                if ( !flipIsValid(k, fs) ) { return false; }
-
-                // Remove any invalid vertices in the tail (i.e. vertices whose constituent nodes
-                // are lost or are in different extant networks.).
-                auto newEnd = std::remove_if(targetNodes.begin(), targetNodes.end(), isInvalidPair);
-                targetNodes.erase(newEnd, targetNodes.end());
-                if (targetNodes.size() == 0) { return false; } //std::cerr << "invalid edge\n"; return false;}
-                
-                int numConnectOptions = connectOptions.size();
-                int numTargets = targetNodes.size();
-
-                std::vector<size_t> inds;
-                inds.reserve( numConnectOptions * numTargets );
-
-                for( auto i : boost::irange(0, numConnectOptions) ) {
-                    for( auto j : boost::irange(0, numTargets) ) { inds.push_back(i); }
+            std::vector<size_t> indexes( iterKeys.size(), 0 );
+            bool added = false;
+            uint32_t numAdded = 0;
+            bool done = false;
+            while ( !done ) {
+                FlipKeyVec res;
+                res.reserve( iterKeys.size() );
+                bool isValidEdge = true;
+                for ( size_t i = 0; i < indexes.size(); ++i ) {
+                    auto& childKey = iterKeys[i][indexes[i]];
+                    res.push_back(childKey);
                 }
-
-                std::vector< FlipKey > edge;
-                edge.reserve(numTargets);
-
-                std::unordered_set< std::string > uniqueEdges;
-
-                size_t numAdded = 0;
-                do {
-
-                  // Build up each possible edge by pairing all of the target nodes with
-                  // each permutation of connect states
-                  for( auto tn : boost::irange(0,numTargets) ) {  // Build "edge"
-
-                    // The pair (u,v) is a current tail node of "edge"
-                    auto u = targetNodes[tn][0]; auto v = targetNodes[tn][1];                    
-                    // The connect state we'll assign to (u,v)                    
-                    auto mustConnect = connectOptions[inds[tn]];
-                    assert(u<=v);
-                    if ( u > v ) { std::cerr << "swapping\n"; std::swap(u,v); swapEndpoints(mustConnect); }
-
-                    // The actual key representing this tail node of "edge".
-                    FlipKey fk( u, v, fs, mustConnect);
-                    
-                    // If the connect state is valid, then add this node to the edge, otherwise
-                    // this edge does not represent a valid recurrence, so skip it.
-                    if ( validConnectState(u,v,mustConnect) ) { 
-                        edge.push_back(fk);
-                    } else {
-                        edge.clear(); break;
+                res.insert( res.end(), fixedKeys.begin(), fixedKeys.end() );
+                if ( isValidEdge and acceptEdge(res) ) { 
+                    double w = 0.0;
+                    for (auto ck : res) {
+                        double transCost = round3(get<0>(pcosts[k.state()][ck.state()]));
+                        transCost = existencePenalty(ti, k, penalty, transCost);                        
+                        w += transCost;
+                        ++numAdded;
                     }
-
-                  }
-
-                  if ( acceptEdge(edge) ) {
-                      added = true;
-                      numAdded += 1;
-                      slnSpaceGraph->addEdge( edge, k, cost );
-                  }              
-                  edge.clear();
-
-                } while ( next_partial_permutation( inds.begin(), inds.begin()+numTargets, inds.end() ) );
-                  
-           } catch ( FlipKey& fk ) {
-
-                std::cerr << "Error adding edge; couldn't find node : ";
-                std::cerr << "{ " << t->getNodeName(fk.u()) << ", " << t->getNodeName(fk.v()) << ", (" <<
-                    fk.f() << ", " << fk.r() << ") } (" << 
-                    fk.connectU() << ", " << fk.connectV() << "), ";
-
-           } catch ( ... ) {
-             std::cerr << "failed to add an edge!\n";
-           }
-           return added;
-        };    
-
-        bool addedEdge{false};
-
-        auto f = k.f(); auto r = k.r();        
-        auto state = k.state();
-        auto flippedState = fsBoth[state];
-
-        MustConnect mustConnect{ k.mustConnect() };
-
-        bool connectU{k.connectU()};
-        bool connectV{k.connectV()};
-
-        const int U = k.u();
-        const int V = k.v();
-        auto UIsInternal = isInternal(U);
-        auto VIsInternal = isInternal(V);
-
-        int LU, RU, LV, RV;
-        LU = RU = LV = RV = -1;
-
-        if ( UIsInternal ) { 
-            auto sons = t->getSonsId(U);
-            assert(sons.size() == 2);
-            LU = sons[0]; RU = sons[1]; 
-            if ( LU > RU ) { std::swap(LU,RU); }
-        }
-        if ( VIsInternal ) { 
-            auto sons = t->getSonsId(V);
-            assert(sons.size() == 2);
-            LV = sons[0]; RV = sons[1]; 
-            if ( LV > RV ) { std::swap(LV,RV); }
-        }
-
-        // Handle the case where this vertex denotes a self loop
-        if (k.arity() == 1) {
-
-            // There are only incoming edges to add if this vertex isn't a leaf
-            if (isInternal(U)) {
-
-                std::vector< MustConnect > lrStates = { 
-                    MustConnect::none, MustConnect::both, MustConnect::right, MustConnect::left
-                };
-
-                // 1 -- we don't flip the self-loop
-                assert( mustConnect == MustConnect::none );
-                auto noFlipLU = FlipKey( LU, LU, state, mustConnect );
-                auto noFlipRU = FlipKey( RU, RU, state, mustConnect );
-                // 2 -- we flip the self loop
-                auto dualFlipLU = flipBoth( noFlipLU );
-                auto dualFlipRU = flipBoth( noFlipRU );
-
-                vector<FlipKey> noFlipEdge = vector<FlipKey>();
-                vector<FlipKey> dualFlipEdge = vector<FlipKey>();
-
-                bool empty{true};
-                // we can only recurse into U if it's not lost
-                if ( !isLost(LU) ) {
-                    noFlipEdge.push_back( noFlipLU );
-                    dualFlipEdge.push_back( dualFlipLU );
-                    empty = false;
+                    slnSpaceGraph->addEdge( res, k, w );
+                    added = true;
                 }
-                // same with V
-                if ( !isLost(RU) ) {
-                    noFlipEdge.push_back( noFlipRU );
-                    dualFlipEdge.push_back( dualFlipRU );
-                    empty = false;
+                if ( indexes.size() == 0 ) {
+                    return added;
                 }
-
-                // We only consider the state between U & V if they are part of the same
-                // extant network and neither is lost
-                if ( !differentExtantNetworks(ti, LU, RU) and !(isLost(LU) or isLost(RU)) ) {
-
-                    // Pair up the homodimer vertices with each of the possible connect states 
-                    // of the heterodimer vertices
-                    for ( auto& cstate : lrStates ) {
-
-                        if ( validConnectState(LU, RU, cstate) ) {
-                            noFlipEdge.push_back( FlipKey(LU, RU, state, cstate ));
-                            slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
-
-                            auto ckey = FlipKey(LU, RU, flippedState, cstate );
-                            
-                            // if ( isValidTransition(k, ckey) ) { 
-                            // DON'T NEED THIS TEST HERE; The same node should ALWAYS be from the same species
-                            
-                            dualFlipEdge.push_back( ckey );
-                            auto w = round3(get<0>(selfLoopCostMap[ k.state() ][ (!f || !r) ]));
-                            w = existencePenalty(ti, k, penalty, w);
-
-                            if ( std::isfinite(w) ) {
-                                addedEdge = true;
-                                slnSpaceGraph->addEdge( dualFlipEdge, k, w );
-                            }
-
-                            // get rid of the heterodimer so we can make the next edge
-                            noFlipEdge.pop_back();
-                            dualFlipEdge.pop_back();
-                        }
+                int j = indexes.size() - 1;
+                while ( true ) {
+                    indexes[j] += 1;
+                    if ( indexes[j] < iterKeys[j].size() ) {
+                        break;
                     }
-
-                } else if ( !empty ) { // If we don't need to consider edges between LU & RU
-                    slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
-
-                    auto w = round3(get<0>(selfLoopCostMap[ k.state() ][ (!f || !r) ]));
-                    w = existencePenalty(ti, k, penalty, w);
-                    if ( std::isfinite(w) ) {
-                        addedEdge = true;
-                        slnSpaceGraph->addEdge( dualFlipEdge, k, w );
+                    indexes[j] = 0;
+                    j -= 1;
+                    if ( j < 0 ) {
+                        return added;
                     }
                 }
-
             }
+        };
 
-        } else { // if U and V are different --- this isn't a self-loop
-
-          typedef std::vector<FlipKey> EdgeTail;
-          typedef std::function<bool(EdgeTail&)> CheckEdgeFunction;
+        using EdgeTail = std::vector<FlipKey>;
+        using CheckEdgeFunction =  std::function<bool(EdgeTail&)>;
             
-          // Don't filter any extra edges
-          CheckEdgeFunction edgeAlwaysOk = [&] ( std::vector< FlipKey >& edge ) -> bool { 
+        // Don't filter any extra edges
+        CheckEdgeFunction edgeAlwaysOk = [&] ( EdgeTail& edge ) -> bool { 
             return edge.size() > 0;
-          };
-            
-          // For at least one flip key in this edge, the state of connectU is true
-          CheckEdgeFunction childrenMustConnectU = [&] ( std::vector< FlipKey >& edge ) -> bool {
-            if ( edge.size() > 0 ) {
-                for ( auto& k : edge ){
-                    if ( k.connectU() ) { return true; }
-                }
-            }
-            return false;
-          };
+        };
 
-        // For at least one flip key in this edge, the state of connectV is true
-        CheckEdgeFunction childrenMustConnectV = [&] ( std::vector< FlipKey >& edge ) -> bool { 
-            if ( edge.size() > 0 ) {
-                for ( auto& k : edge ){
-                    if ( k.connectV() ) { return true; }
-                }
-            }
-            return false;
-        };            
-
-        if ( mustConnect == MustConnect::both ) {
-          if ( UIsInternal or VIsInternal ) {
-            
-            // Since connectU  and connectV are both true, then something
-            // must flip the state to U and something must flip the state to V.
-            // The only way this is possible without creating a blocking loop is by 
-            // flipping {U,V}.  Thus, we consider all possible ways of recursing
-            // on U and V, but we only consider recursions where we flip the state
-            // of the interaction.
-            
-            // The nodes into which we'll recurse
-            std::vector< std::vector<int> > targetNodes;
-            // The set of connect options we'll allow in these nodes
-            std::vector< MustConnect > connectOptions{ 
-                MustConnect::none, MustConnect::left, MustConnect::right, MustConnect::both 
-            }; 
-
-
-            // The cost of performing the flip
-            auto w = round3(get<0>(costMap[ state ][ flippedState ]));
-            w = existencePenalty(ti, k, penalty, w);
-
-            // If both U and V are internal we consider the cases of recursing into both
-            // of them simultaneously.  Any path which takes one of these edges will consider
-            // no further flips to U or V.
-            if ( UIsInternal and VIsInternal ) { 
-                targetNodes = { {LU,LV}, {LU,RV}, {RU,LV}, {RU,RV} };
-                assert( LU <= LV ); assert( LU <= RV );
-                assert( RU <= LV ); assert( RU <= RV );
-                addedEdge |= addPossibleEdges( targetNodes, connectOptions, k,  flippedState, w, edgeAlwaysOk );
-            }
-
-            // If V is internal, then we can recurse into its children.  However,
-            // to avoid ambiguity, we will only consider the cases where a descendant of V
-            // still flips the state to U (otherwise, we only consider recursing on both
-            // which is handled above).
-            if ( VIsInternal ) {
-               targetNodes = { {U,LV}, {U,RV} };
-               assert(U <= LV); assert(U <= RV);
-               addedEdge |= addPossibleEdges( targetNodes, connectOptions, k, flippedState, w, childrenMustConnectU );
-            }
-
-            // If U is internal, then we can recurse into its children.  However,
-            // to avoid ambiguity, we will only consider the cases where a descendant of U
-            // still flips the state to V (otherwise, we only consider recursing on both
-            // which is handled above).
-            if ( UIsInternal ) {
-                targetNodes = { {LU,V}, {RU,V} };
-                assert(LU <= V); assert(RU <= V);
-                addedEdge |= addPossibleEdges( targetNodes, connectOptions, k, flippedState, w, childrenMustConnectV );
-            }
-
-        } 
-    } else if ( mustConnect == MustConnect::left ) {
-        
-        // Since connectV is 0, we *can not* flip {U,V}, but _something_ beneath V *must* still 
-        // flip the state to U.
-        // This implies that we only consider recursing on V and recursing without flipping.
-        // Also, since something beneath V must still flip the state to U, we only consider
-        // recursing to nodes with the flip state {1,0} or {1,1}
-        
-        if ( VIsInternal ) { // If we can't recurse on V then we're hosed
-           assert(U < LV);
-           assert(U < RV);
-           std::vector< std::vector<int> > targetNodes{ {U,LV}, {U,RV} };
-           std::vector< MustConnect > connectOptions{ 
-            MustConnect::both, MustConnect::left, MustConnect::right, MustConnect::none 
-           };
-           addedEdge = addPossibleEdges( targetNodes, connectOptions, k, state, 0.0, childrenMustConnectU );
-        } else { 
-            std::cerr << "ERROR\n";
-            std::abort();
-        }                
-
-    } else if ( mustConnect == MustConnect::right ) {
-        
-        // Since connectU is 0, we *can not* flip {U,V}, but _something_ beneath U *must* still 
-        // flip the state to V.
-        // This implies that we only consider recursing on U and recursing without flipping.
-        // Also, since something beneath U must still flip the state to V, we only consider
-        // recursing to nodes with the flip state {0,1} or {1,1}
-
-        if ( UIsInternal ) { // If we can't recurse on U then we're hosed
-            assert(LU < V);
-            assert(RU < V);
-            std::vector< std::vector<int> > targetNodes = { {LU,V}, {RU,V} };
-            std::vector< MustConnect > connectOptions{ 
-                MustConnect::both, MustConnect::left, MustConnect::right, MustConnect::none 
-            };
-            
-            addedEdge = addPossibleEdges( targetNodes, connectOptions, k, state, 0.0, childrenMustConnectV );
-        } else { 
-            std::cerr << "ERROR\n";
-            std::abort();
-        }
-
-    } else if ( mustConnect == MustConnect::none ) {
-        // If neither node is internal, then we can't recurse at all
-        if ( UIsInternal or VIsInternal )  {
-
-            // We're not allowed to change the state to U or V, so we must not flip.
-
-            // The nodes into which we'll recurse
-            std::vector< std::vector<int> > targetNodes;
-            // The set of connect options we'll allow in these nodes
-            std::vector< MustConnect > connectOptions;
-            
-            // If both U and V are internal
-            if ( UIsInternal and VIsInternal ) { 
-                targetNodes = { {LU,LV}, {LU,RV}, {RU,LV}, {RU,RV} };
-                connectOptions = { MustConnect::both, MustConnect::left, MustConnect::right, MustConnect::none };
-            } else
-
-            // If U is a leaf, then the connect state of the childern must be {0,0}
-            // since there is nothing below U to connect to V and since the connect
-            // state at U,V is {0,0}, nothing below V is allowed to connect to U.
-            if ( (!UIsInternal) and VIsInternal) {
-                targetNodes = { {U,LV}, {U,RV} };
-                connectOptions = { MustConnect::none };
-            } else
-
-            // If V is a leaf, the same argument as above applies and the connect stae
-            // of all children must be {0,0}.
-            if ( UIsInternal and (!VIsInternal) ) {
-                targetNodes = { {LU,V}, {RU,V} };
-                connectOptions = { MustConnect::none };                  
-            }
-            addedEdge = addPossibleEdges( targetNodes, connectOptions, k, state, 0.0, edgeAlwaysOk );            
-        }
-
-    }
-        }
-        return addedEdge;
-    };
-
-    /**
-    * Adds the appropriate incoming hyperedges to the hypervertex 'k'.
-    */
-    AddHyperEdgeFuncT addIncomingHyperedgeAmbiguous = [ = , &costMap, &selfLoopCostMap, &slnSpaceGraph, &penalty, &t] (
-        const FlipKey & k //!< The vertex to which we'll add the incoming edges
-        ) -> bool {
-
-
+        auto kidx = slnSpaceGraph->index(k);
             auto state = k.state();
             auto flippedState = fsBoth[state];
             auto f = k.f(); auto r = k.r();
@@ -1647,7 +1826,245 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
                 if ( LV > RV ) { std::swap(LV,RV); }
             }
 
-            if ( k.arity() == 1 ) { // self-loop
+            if (k.isSelfLoop()) { // self-loop
+
+                // If this is a speciation event
+              if (Utils::Trees::isSpeciationEvent(k, ti)) { 
+                int specA = LU;
+                int specB = RU;
+
+                bool haveA = !(isLost(specA));
+                bool haveB = !(isLost(specB));
+
+                std::vector< FlipKeyVec > iterKeys;
+                std::vector<FlipKey> none;
+
+                if (haveA) {
+                    iterKeys.push_back({{specA, specA, state}, {specA, specA, flippedState}});
+                }
+                if (haveB) {
+                    iterKeys.push_back({{specB, specB, state}, {specB, specB, flippedState}});                    
+                }
+                auto addedEdge = addCartesianProduct(iterKeys, none, specCostMap, edgeAlwaysOk);
+                if ((haveA or haveB) and !addedEdge) {
+                    std::cerr << "FUDGE BUCKETS!\n";
+                }
+                return addedEdge;
+
+              }
+
+
+              if (isInternal(U)) {
+                /** Possible states
+                * {LU,LU}  {RU, RU}  {LU, RU}
+                *    0        0         0
+                *    0        0         1
+                *    0        1         0
+                *    0        1         1
+                *    1        0         0
+                *    1        0         1
+                *    1        1         0
+                *    1        1         1
+                */
+                std::vector<FlipKeyVec> iterKeys;
+                std::vector<FlipKey> none;
+                if (!isLost(LU)) {
+                    iterKeys.push_back( {{LU, LU, FlipState::both},{LU, LU, FlipState::none}} );
+                }
+                if (!isLost(RU)) {
+                    iterKeys.push_back( {{RU, RU, FlipState::both},{RU, RU, FlipState::none}} );
+                }
+                if (Utils::Trees::sameSpecies(t, LU, RU) and
+                    !(isLost(LU) or isLost(RU))) {
+                    iterKeys.push_back( {{LU, RU, FlipState::both},{LU, RU, FlipState::none}} );
+                }
+                return addCartesianProduct(iterKeys, none, costMap, edgeAlwaysOk);
+
+             } // isInternal(U)
+
+            } else { // non-self-loop
+            
+              if (Utils::Trees::isSpeciationEvent(k, ti)) { 
+                int specAU, specAV, specBU, specBV;
+                tie(specAU, specAV, specBU, specBV) = Utils::Trees::correspondingSpecies(k, ti);
+
+                std::vector< FlipKeyVec > iterKeys;
+                std::vector<FlipKey> none;
+
+                bool haveA = !(isLost(specAU) or isLost(specAV));
+                bool haveB = !(isLost(specBU) or isLost(specBV));
+
+                if (haveA) {
+                    iterKeys.push_back({{specAU, specAV, state}, {specAU, specAV, flippedState}});
+                }
+                if (haveB) {
+                    iterKeys.push_back({{specBU, specBV, state}, {specBU, specBV, flippedState}});                    
+                }
+                auto addedEdge = addCartesianProduct(iterKeys, none, specCostMap, edgeAlwaysOk);
+                if ((haveA or haveB) and !addedEdge) {
+                    std::cerr << "FUDGE BUCKETS!\n";
+                }
+                return addedEdge;
+              }
+    
+              std::vector< FlipKeyVec > iterKeys;
+              std::vector< FlipKey > none;
+              /**  Covers the cases where U duplicates first
+              *    s(LU,V)   s(RU,V)
+              *    -------   -------
+              *       T          T
+              *       T          F
+              *       F          T
+              *       F          F
+              */
+              if (isInternal(U)) {
+                if ( LU > RU ) { std::swap(LU, RU); }
+
+                if (Utils::Trees::sameSpecies(t, LU, V) and
+                    !(isLost(LU) || isLost(V))) {
+                    iterKeys.push_back( {FlipKey(LU, V, FlipState::both), FlipKey(LU, V, FlipState::none)} ); 
+                }
+
+                if (Utils::Trees::sameSpecies(t, RU, V) and
+                    !(isLost(RU) || isLost(V))) {
+                    iterKeys.push_back( {FlipKey(RU, V, FlipState::both), FlipKey(RU, V, FlipState::none)} ); 
+                }
+
+              }
+              auto addedUEdge = addCartesianProduct(iterKeys, none, costMap, edgeAlwaysOk);
+              iterKeys.clear();
+
+
+              /**  Covers the cases where V duplicates first
+              *    s(U,LV)   s(U,RV)
+              *    -------   -------
+              *       T          T
+              *       T          F
+              *       F          T
+              *       F          F
+              */
+              if ( isInternal(V) ) {
+                if ( LV > RV ) { std::swap(LV, RV); }
+
+                if (Utils::Trees::sameSpecies(t, U, LV) and
+                    //not differentExtantNetworks(ti, LV, U) and
+                    !(isLost(LV) || isLost(U))) {
+                    iterKeys.push_back( {FlipKey(U, LV, FlipState::both),
+                                         FlipKey(U, LV, FlipState::none)});
+                }
+
+                if (Utils::Trees::sameSpecies(t, U, RV) and
+                    //not differentExtantNetworks(ti, RV, U) and
+                    !(isLost(RV) || isLost(U))) {
+                    iterKeys.push_back( {FlipKey(U, RV, FlipState::both),
+                                        FlipKey(U, RV, FlipState::none)});
+                }
+
+              }
+              auto addedVEdge = addCartesianProduct(iterKeys, none, costMap, edgeAlwaysOk);
+              
+              if (slnSpaceGraph->incident(kidx).size() == 0) {
+                std::stringstream ss;
+                //  and isInternal(U)) or (!addedVEdge and isInternal(V))) {
+                ss << "added no outgoing edge to " << Utils::stringForKey(k, t) << "; children [";
+                bool hasKids{false};
+                if (isInternal(U)) {
+                    ss << Utils::Trees::getName(t, LU) << ", " << Utils::Trees::getName(t, RU) << ", ";
+                    hasKids=true;
+                }
+                if (isInternal(V)) {
+                    ss << Utils::Trees::getName(t, LV) << ", " << Utils::Trees::getName(t, RV) << ", ";
+                    hasKids=true;                
+                }
+                ss << "]\n";
+                if (hasKids) { std::cerr << ss.str() << "\n"; }
+              }
+              return (addedUEdge or addedVEdge);
+
+          } // non-self-loop
+          return false;
+    };
+
+    /**
+    * Adds the appropriate incoming hyperedges to the hypervertex 'k', assuming that we allow
+    * for "ambiguous" derivations.
+    */
+    AddHyperEdgeFuncT addIncomingHyperedgeAmbiguous2 = [=, 
+        &costMap,
+        &specCostMap, 
+        &slnSpaceGraph, 
+        &penalty, 
+        &t] ( 
+              const FlipKey & k //!< The vertex to which we'll add the incoming edges
+            ) -> bool {
+
+            using FlipKeyVec = std::vector<FlipKey>;
+            auto state = k.state();
+            auto flippedState = fsBoth[state];
+            auto f = k.f(); auto r = k.r();
+
+            double canonicalDerivCost = 0.0;
+            const int U = k.u();
+            const int V = k.v();
+            auto UIsInternal = isInternal(U);
+            auto VIsInternal = isInternal(V);
+
+            int LU, RU, LV, RV;
+            LU = RU = LV = RV = -1;
+
+            if ( UIsInternal ) { 
+                auto sons = t->getSonsId(U);
+                LU = sons[0]; RU = sons[1]; 
+                if ( LU > RU ) { std::swap(LU,RU); }
+            }
+            if ( VIsInternal ) { 
+                auto sons = t->getSonsId(V);
+                LV = sons[0]; RV = sons[1]; 
+                if ( LV > RV ) { std::swap(LV,RV); }
+            }
+
+            if (k.isSelfLoop()) { // self-loop
+
+                // If this is a speciation event
+              if (Utils::Trees::isSpeciationEvent(k, ti)) { 
+                int specA = LU;
+                int specB = RU;
+
+                bool haveA = !(isLost(specA));
+                bool haveB = !(isLost(specB));
+
+                vector<vector<FlipKey>> edges;
+                vector<FlipKey> none;
+
+                if (haveA and haveB) {
+                    edges.push_back({FlipKey(specA, specA, state), 
+                                     FlipKey(specB, specB, state)});
+                    edges.push_back({FlipKey(specA, specA, flippedState), 
+                                     FlipKey(specB, specB, flippedState)});
+                } else if (haveA) {
+                    edges.push_back({FlipKey(specA, specA, state)});
+                    edges.push_back({FlipKey(specA, specA, flippedState)});
+                } else if (haveB) {
+                    edges.push_back({FlipKey(specB, specB, state)});
+                    edges.push_back({FlipKey(specB, specB, flippedState)});
+                }
+
+                bool addedEdge{false};
+                if (edges.size() > 0) {
+                    double w = 0.0;
+                    for (auto& edge : edges) {
+                        auto transCost = round3(get<0>(specCostMap[state][edge.front().state()]));
+//                        if (edge.front().state() == FlipState::both) { // != k.state()){
+                        transCost = existencePenalty(ti, k, penalty, transCost);                        
+//                        }
+                        w = transCost;
+                        slnSpaceGraph->addEdge(edge, k, w);
+                        addedEdge = true;
+                        w = 0.0;
+                    }
+                }
+                return addedEdge;
+              }
 
                 // There are only incoming edges to add if this vertex isn't a leaf
                 if (isInternal(U)) {
@@ -1676,22 +2093,33 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
                   }
 
                   // We only consider the state between U & V if they are part of the same
-                  // extant network and neither is lost
-                  if ( !differentExtantNetworks(ti, LU, RU) and !(isLost(LU) or isLost(RU)) ) {
+                  // species and neither is lost
+                  if (Utils::Trees::sameSpecies(t, LU, RU) and
+                      //!differentExtantNetworks(ti, LU, RU) and 
+                      !(isLost(LU) or isLost(RU)) ) {
                     noFlipEdge.push_back( FlipKey(LU, RU, state ));
                     auto flipBetween = FlipKey(LU, RU, flippedState );
-                    if ( isValidTransition(k, flipBetween) ) {
-                        dualFlipEdge.push_back( flipBetween );
-                    }
+                    dualFlipEdge.push_back( flipBetween );
                     empty = false; 
                   }
 
                   if ( !empty ) { // if there's something to add
 
-                    slnSpaceGraph->addEdge( noFlipEdge, k, 0.0 );
-                    auto opState = ( k.state() == FlipState:: none ) ? true : false;
-                    auto w = round3(get<0>(selfLoopCostMap[ k.state() ][ opState ]));
+                    auto w = round3(get<0>(costMap[k.state()][k.state()]));
+//                    if (k.state() == FlipState::both) { //!= k.state()) {   
+                    w = existencePenalty(ti, k, penalty, w); 
+//                    }
+                    slnSpaceGraph->addEdge(noFlipEdge, k, w);
+
+                    auto opState = ( k.state() == FlipState::none ) ? FlipState::both : FlipState::none;
+                    w = round3(get<0>(costMap[ k.state() ][ opState ]));
+                    
+                    //auto opState = ( k.state() == FlipState:: none ) ? true : false;
+                    //auto w = round3(get<0>(selfLoopCostMap[ k.state() ][ opState ]));
+                    //
+//                    if (k.state() == FlipState::both) { //!= k.state()) {    
                     w = existencePenalty(ti, k, penalty, w);
+//                    }
 
                     if ( std::isfinite(w) ) {
                         slnSpaceGraph->addEdge( dualFlipEdge, k, w );
@@ -1701,7 +2129,67 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
              } // isInternal(U)
 
             } else { // non-self-loop
+            
+              if (Utils::Trees::isSpeciationEvent(k, ti)) { 
+                int specAU, specAV, specBU, specBV;
+                tie(specAU, specAV, specBU, specBV) = Utils::Trees::correspondingSpecies(k, ti);
 
+                bool haveA = !(isLost(specAU) or isLost(specAV));
+                bool haveB = !(isLost(specBU) or isLost(specBV));
+
+                vector<FlipKey> noFlip, flipBoth, flipA, flipB;
+
+                if (haveA and haveB) {
+                    noFlip   = {FlipKey(specAU, specAV, state), 
+                                FlipKey(specBU, specBV, state)};
+                    flipBoth = {FlipKey(specAU, specAV, flippedState), 
+                                FlipKey(specBU, specBV, flippedState)};
+                } else if (haveA) {
+                    noFlip   = {FlipKey(specAU, specAV, state)};
+                    flipA    = {FlipKey(specAU, specAV, flippedState)};
+                } else if (haveB) {
+                    noFlip   = {FlipKey(specBU, specBV, state)};                    
+                    flipB    = {FlipKey(specBU, specBV, flippedState)};                                                            
+                } else {
+                    return false;
+                }
+
+                bool addedEdge{false};
+                if (noFlip.size() > 0) {
+                    double w = round3(get<0>(specCostMap[state][state]));
+//                    if (state == FlipState::both) { //)                    
+                    w = existencePenalty(ti, k, penalty, w);   
+//                    }
+                    slnSpaceGraph->addEdge(noFlip, k, w);                    
+                    addedEdge = true;
+                }
+                if (flipA.size() > 0) {
+                    double w = round3(get<0>(specCostMap[state][flippedState]));
+//                    if (state == FlipState::both) { //)
+                    w = existencePenalty(ti, k, penalty, w);   
+//                    }                    
+                    slnSpaceGraph->addEdge(flipA, k, w);
+                    addedEdge = true;                    
+                }
+                if (flipB.size() > 0) {
+                    double w = round3(get<0>(specCostMap[state][flippedState]));
+//                    if (state == FlipState::both) { //
+                    w = existencePenalty(ti, k, penalty, w); 
+//                    }                   
+                    slnSpaceGraph->addEdge(flipB, k, w);
+                    addedEdge = true;                    
+                }
+                if (flipBoth.size() > 0) {
+                    double w = round3(get<0>(specCostMap[state][flippedState]));
+//                    if (state == FlipState::both) { //
+                    w = existencePenalty(ti, k, penalty, w); 
+//                    }                   
+                    slnSpaceGraph->addEdge(flipBoth, k, w);
+                    addedEdge = true;                    
+                }
+                return addedEdge;
+              }
+    
               if ( isInternal(U) ) { // Recurse into U
 
                  // Don't flip
@@ -1715,16 +2203,23 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
                  vector<FlipKey> dualFlip = vector<FlipKey>();
                  auto dualFlipLU = flipBoth(noFlipLU);
                  auto dualFlipRU = flipBoth(noFlipRU);
-                 if ( isValidTerm(dualFlipLU) and isValidTransition(k, dualFlipLU)) { dualFlip.push_back(dualFlipLU); }
-                 if ( isValidTerm(dualFlipRU) and isValidTransition(k, dualFlipRU)) { dualFlip.push_back(dualFlipRU); }
+                 if ( isValidTerm(dualFlipLU)) { dualFlip.push_back(dualFlipLU); }
+                 if ( isValidTerm(dualFlipRU)) { dualFlip.push_back(dualFlipRU); }
 
                 if ( noFlip.size() > 0 ) {
-                    slnSpaceGraph->addEdge( noFlip, k, canonicalDerivCost);
+                    auto w = round3(get<0>(costMap[ state ][ state ])); 
+//                    if (state == FlipState::both) { //
+                    w = existencePenalty(ti, k, penalty, w);
+//                    }
+
+                    slnSpaceGraph->addEdge( noFlip, k, w);                    
                 }
 
                 if ( dualFlip.size() > 0 ) {
                     auto w = round3(get<0>(costMap[ state ][ flippedState ])); 
+//                    if (state == FlipState::both) { //
                     w = existencePenalty(ti, k, penalty, w);
+//                    }
 
                     if ( std::isfinite(w) ) {
                         slnSpaceGraph->addEdge( dualFlip, k, w );
@@ -1747,16 +2242,21 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
                  auto dualFlipLV = flipBoth(noFlipLV);
                  auto dualFlipRV = flipBoth(noFlipRV);
 
-                 if ( isValidTerm(dualFlipLV) and isValidTransition(k, dualFlipLV)) { dualFlip.push_back(dualFlipLV); }
-                 if ( isValidTerm(dualFlipRV) and isValidTransition(k, dualFlipRV)) { dualFlip.push_back(dualFlipRV); }
+                 if ( isValidTerm(dualFlipLV) /*and isValidTransition(k, dualFlipLV)*/) { dualFlip.push_back(dualFlipLV); }
+                 if ( isValidTerm(dualFlipRV) /*and isValidTransition(k, dualFlipRV)*/) { dualFlip.push_back(dualFlipRV); }
 
                 if ( noFlip.size() > 0 ) {
-                    slnSpaceGraph->addEdge( noFlip, k, canonicalDerivCost);
+                    auto w = round3(get<0>(costMap[ state ][ state ])); 
+//                    if (state == FlipState::both) { //
+                    w = existencePenalty(ti, k, penalty, w);                        
+//                    }                    
+                    slnSpaceGraph->addEdge( noFlip, k, w);                    
                 }
                 if ( dualFlip.size() > 0 ) {
                     auto w = round3(get<0>(costMap[ state ][ flippedState ])); 
+//                    if (flippedState == FlipState::both) { //
                     w = existencePenalty(ti, k, penalty, w);
-
+//                    }
                     if ( std::isfinite(w) ) {
                         slnSpaceGraph->addEdge( dualFlip, k, w );
                     }
@@ -1773,7 +2273,7 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
                          addHyperNodeAmbiguous : addHyperNodeUnambiguous;
 
     auto addIncomingHyperedge = (dtype == MultiOpt::DerivationType::AllHistories) ? \
-                                 addIncomingHyperedgeAmbiguous : addIncomingHyperedgeUnambiguous;
+                                 addIncomingHyperedgeAmbiguous2 : addIncomingHyperedgeUnambiguous;
     
     // Create the vector of all nodes
     auto nodes = t->getNodesId();
@@ -1793,7 +2293,8 @@ unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph(
             int v = *vit;
 
             if ( ((u == v) and !isLost(u) ) or
-                !(differentExtantNetworks(ti, u, v) or
+                !((!Utils::Trees::sameSpecies(t, u, v)) or 
+                  //differentExtantNetworks(ti, u, v) or
                   ti.inSubnodesOf(u, v) or
                   ti.inSubnodesOf(v, u) or
                   (isLost(u) or isLost(v))) ) {
@@ -1842,9 +2343,7 @@ void leafCostDict(
     TreePtrT &T,                      //!< Phylogeny
     TreeInfo& ti,                     //!< Extra tree information
     GT &G,                            //!< Extant graph
-    bool directed,                    //!< Is the graph directed?
-    double cc,                        //!< Edge creation cost
-    double dc,                        //!< Edge deletion cost
+    const ParsimonyCosts& pc,
     slnDictT &slnDict                 //!< Dictionary of subproblem solutions
     ) {
     
@@ -1853,12 +2352,17 @@ void leafCostDict(
     typedef unordered_set<NodeT> NodeSetT;
 
     boost::timer::auto_cpu_timer timer("Populating Base Cases [%ws wall, %us user + %ss system = %ts CPU (%p%)]\n");
+    auto directed = pc.isDirected();
     auto undirected = !directed;
     auto isLost = [&]( int nid ) -> bool { return (T->getNodeName(nid)).find("LOST") != std::string::npos; };
-
+    
     auto printKey = [&]( const FlipKey& k ) -> void {
         std::cerr << "{ " << T->getNodeName(k.u()) << ", " << T->getNodeName(k.v()) << ", (" <<
             k.f() << ", " << k.r() << ")} ( " << k.connectU() << ", " << k.connectV() << ")\n";
+    };
+
+    auto getSpeciesName = [&](const TreePtrT& t, int nid) -> string {
+            return dynamic_cast<bpp::BppString*>( t->getNodeProperty(nid,"S") )->toSTL();
     };
 
     auto none = FlipState::none;
@@ -1866,13 +2370,17 @@ void leafCostDict(
     auto rev = FlipState::reverse;
     auto both = FlipState::both;
 
-    auto costDict = getCostDict(cc, dc, directed);
-    auto selfLoopCostDict = getSelfLoopCostDict(cc, dc, directed);
-    auto costFunDict = getCostFunDict(cc, dc, directed);
-    auto selfLoopCostFunDict = getSelfLoopCostFunDict(cc, dc, directed );
+    // The cost of transitions between different states and self-loops
+    double cc = 1.2;
+    double dc = 1.0;
 
-    auto N = H->order();
-    auto M = H->size();
+    const costMapT& costDict = pc.getCostDict();
+
+    //costMapT costDict(getCostDict(cc, dc, directed));
+    //selfCostMapT selfLoopCostDict(getSelfLoopCostDict(cc, dc, directed));
+
+    size_t N = H->order();
+    size_t M = H->size();
 
     using boost::counting_range;
 
@@ -1880,19 +2388,20 @@ void leafCostDict(
     // We'll have either N^2 or (N^2)/2 leaf hypernodes (depending
     // on directedness)
     auto numExtantNodes = std::distance( vertices(G).first, vertices(G).second );
-    auto numConn = ( numExtantNodes * numExtantNodes );
-    if (undirected) {
-        numConn /= 2;
+    auto numConn = (numExtantNodes * (numExtantNodes-1)) / 2;
+    if (directed) {
+        numConn *= 2;
     }
+    numConn += numExtantNodes;
 
     vector<size_t> leafHypernodes;
     leafHypernodes.reserve(numConn);
 
     // A hypernode is a leaf if it has no incoming edges
-    for ( auto i : counting_range(size_t{0},N) ) {
+    for ( size_t i : boost::irange(size_t{0}, N) ) {
         if (H->incident(i).size() == 0) { leafHypernodes.push_back(i); }
     }
-
+    
     // Is the node e contained in the set s?
     auto contains = [] ( const NodeSetT & s, NodeT e ) -> bool {
         return s.find(e) != s.end();
@@ -1919,8 +2428,10 @@ void leafCostDict(
     Google<Derivation::flipT>::Set effectiveEdges;
     effectiveEdges.set_empty_key( make_tuple(-1, -1, ""));
 
+    auto leafCostRatio = pc.leafCostRatio();
+
     auto setLeafWeight = [&]( costRepT& costFlipProb, FlipKey& nd, int n ) -> void {
-        auto cost = round3(get<0>(costFlipProb));
+        auto cost = leafCostRatio * round3(get<0>(costFlipProb));
         auto flip = get<1>(costFlipProb);
         if ( flip != "n" ) { effectiveEdges.insert( make_tuple(nd.u(), nd.v(), flip) ); }
         slnDict[n] = { {0, Derivation(cost, n, ev, effectiveEdges)} };
@@ -1940,7 +2451,40 @@ void leafCostDict(
         // If either of the vertices contained in this hypernode
         // is not a leaf, then the
         if ( !(T->isLeaf(nd.u()) and T->isLeaf(nd.v())) ) {
-            assert(lostU or lostV);
+            if (!(lostU or lostV)) {
+                std::stringstream ss;
+                ss << "WHATTTT!: ";
+                ss << "Node to " << Utils::stringForKey(nd, T) << "; children [";
+
+                bool hasKids{false};
+                if (!T->isLeaf(nd.u())) {
+                    auto sons = T->getSonsId(nd.u());
+                    int LU = sons[0]; int RU = sons[1]; 
+                    if ( LU > RU ) { std::swap(LU,RU); }
+                    ss << Utils::Trees::getName(T, LU) << "(" << getSpeciesName(T,LU) << "),  " <<
+                          Utils::Trees::getName(T, RU) << "(" << getSpeciesName(T,RU) << "), ";
+                    hasKids=true;
+                }
+                if (!T->isLeaf(nd.v())) {
+                    auto sons = T->getSonsId(nd.v());
+                    int LV = sons[0]; int RV = sons[1]; 
+                    if ( LV > RV ) { std::swap(LV, RV); }
+                    ss << Utils::Trees::getName(T, LV) << "(" << getSpeciesName(T,LV) << "),  " << 
+                          Utils::Trees::getName(T, RV) << "(" << getSpeciesName(T,RV) << "),  ";
+                    hasKids=true;                
+                }
+                ss << "]\n";
+                bool lostBoth{false};
+                if (Utils::Trees::isSpeciationEvent(nd, ti)) {
+                    int specAU, specAV, specBU, specBV;
+                    tie(specAU, specAV, specBU, specBV) = Utils::Trees::correspondingSpecies(nd, ti);
+                    if ((isLost(specAU) or isLost(specAV)) and (isLost(specBU) or isLost(specBV))) {
+                        lostBoth = true;
+                    }
+                }
+
+                if (hasKids and !lostBoth) { std::cerr << ss.str() << "\n"; }
+            }
             vector<size_t> ev;
             Google<Derivation::flipT>::Set es;
             es.set_empty_key( make_tuple(-1, -1, ""));            
@@ -1994,13 +2538,15 @@ void leafCostDict(
                 double w_l = hasSelfLoop ? G[e].weight : 0.0;
 
                 tweight += w_l * (hasSelfLoop) * (nd.f() + nd.r());
-                auto costFlipProb = selfLoopCostDict[ nd.state() ][ hasSelfLoop ];
+                FlipState selfLoopState = hasSelfLoop ? FlipState::both : FlipState::none;
+                auto costFlipProb = costDict[ nd.state() ][ selfLoopState ];
+                //auto costFlipProb = selfLoopCostDict[ nd.state() ][ hasSelfLoop ];                
                 //auto costFlipProb = selfLoopCostFunDict[ nd.state() ][ hasSelfLoop ](w_l);                
                 setLeafWeight( costFlipProb, nd, n);
             } // ( u != v )
         } // ( lostU || lostV )
     } // loop over leaf hypernodes
-
+    
 }
 
 template <typename CostClassT>
@@ -2325,7 +2871,7 @@ vector<CostClassT> computeKBest(const size_t &vid,
     };
 
     // Exact score classes
-    double epsilon = 0.25;//0.1;
+    double epsilon = 0.2;//0.1;
 
     // While there are still derivations left in the heap,
     // and we don't yet have the required number of solutions
@@ -2476,6 +3022,7 @@ bool viterbiCountNew(
     H->addVertex( rootFlip );
     auto rootIdNoFlip = H->index(rootKey);
     auto rootIdFlip = H->index(rootFlip);
+    boost::dynamic_bitset<> normed( maxID + 1 );
 
     cerr << "Down phase\n";
     eta.reset(order.size()); eta.start();
@@ -2620,7 +3167,9 @@ bool viterbiCountNew(
                 // What is the action along edge 'e' (i.e. how is
                 // the state of the interaction function different
                 // between *vit and the tail nodes of e)
-                auto ft = flipType( key, H->vertex(tail.front()) );
+                // for (auto tind : tail) {
+                // auto ft = flipType( key, H->vertex(tind));
+                auto ft = flipType( key, H->vertex(tail.front()) );                
                 auto outInd = (ft == "n") ? *vit : complementInd;
 
                 // Accumulate the probability due to the current
@@ -2634,6 +3183,7 @@ bool viterbiCountNew(
                 // END Testing
                 
                 outProbMap[outInd] += etprob;
+
 
                 /** Testing **/
                 /*
@@ -2753,10 +3303,21 @@ bool viterbiCountNew(
                 outProbMap[vid] = outProbMap[oid] = 0.0;
             }
 
+            psum = probMap[vid] + probMap[oid];        
+            if ( psum > 0.0 )  {
+                auto norm = 1.0 / psum;
+                probMap[vid] *= norm;
+                probMap[oid] *= norm;
+            } else {
+                probMap[vid] = probMap[oid] = 0.0;
+            }
+
+
         }
         
         auto approxInProb = probMap[vid];
         auto approxProb = outProbMap[vid];
+        //auto approxProb = probMap[vid];
 
         bool writeOut = true;
 
@@ -2950,6 +3511,10 @@ vector<double> getAlphas( const vector< tuple<double, BigInt> > &slnVec, const B
     }
     return alphas;
 }
+
+/* =============== END PARSIMONY ================== */
+
+
 
 FlipKey canonicalKey( const FlipKey&k ){
     return FlipKey(k.u(), k.v(), k.state(), MustConnect::none);
@@ -4147,9 +4712,9 @@ template void MultiOpt::MLLeafCostDict< undirectedGraphT  >( unique_ptr<ForwardH
 
 template void MultiOpt::MLLeafCostDict< directedGraphT >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & ,  Utils::TreeInfo& ti, directedGraphT & , bool , double , double , MultiOpt::slnDictT & );
 
-template void MultiOpt::leafCostDict< undirectedGraphT  >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , Utils::TreeInfo& ti, undirectedGraphT & , bool , double , double , MultiOpt::slnDictT & );
+template void MultiOpt::leafCostDict< undirectedGraphT  >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , Utils::TreeInfo& ti, undirectedGraphT & , const ParsimonyCosts&, MultiOpt::slnDictT & );
 
-template void MultiOpt::leafCostDict< directedGraphT >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , Utils::TreeInfo& ti, directedGraphT & , bool , double , double , MultiOpt::slnDictT & );
+template void MultiOpt::leafCostDict< directedGraphT >( unique_ptr<ForwardHypergraph> & , Utils::Trees::TreePtrT & , Utils::TreeInfo& ti, directedGraphT & , const ParsimonyCosts&, MultiOpt::slnDictT & );
 
 using MultiOpt::LazyCostClass;
 using MultiOpt::EagerCostClass;

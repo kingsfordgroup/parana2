@@ -47,6 +47,7 @@
 // The logger
 #include "cpplog.hpp"
 #include "model.hpp"
+#include "ParsimonyCosts.hpp"
 #include "PhyloXMLParser.hpp"
 
 /** Namespace uses */
@@ -163,6 +164,7 @@ int main( int argc, char **argv ) {
     ("del", po::value< double >()->default_value(1.0), "deletion cost")
     ("ratio,r", po::value< double >()->default_value(1.2), "ratio of creation to deletion cost")
     ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
+    ("parsimonyCosts,m", po::value< string >()->default_value(""), "file containing costs for different events")
     ("numOpt,k", po::value< size_t>()->default_value(40), "number of near-optimal score classes to use")
     ("timePenalty,p", po::value< double >()->default_value(1.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
     ("single,s", po::value<bool>()->zero_tokens(), "compute a single optimal set of flips (i.e. \"Parana 1\")")
@@ -206,6 +208,8 @@ int main( int argc, char **argv ) {
             }
         }
 
+
+
         string graphName = ap["target"].as<string>();
         string outputName = ap["output"].as<string>();
 
@@ -213,11 +217,14 @@ int main( int argc, char **argv ) {
         bool directed = !undirected;
 
         double penalty = ap["timePenalty"].as<double>();
+        
         double deletionCost = ap["del"].as<double>();
         double creationCost = ap["ratio"].as<double>() * deletionCost;
+        
+       
         size_t k = ap["numOpt"].as<size_t>();
 
-        std::cerr << "[creation] : [deletion] ratio is [" << creationCost << "] : [" << deletionCost << "]\n";
+        //std::cerr << "[creation] : [deletion] ratio is [" << creationCost << "] : [" << deletionCost << "]\n";
         std::cerr << "TimePenalty is [" << penalty << "]\n";
         std::cerr << "Considering top " << k << " cost classes\n";
 
@@ -438,7 +445,7 @@ int main( int argc, char **argv ) {
                 vector<size_t> order; order.reserve( H->order() );
                 MultiOpt::topologicalOrder( H, tree, tinfo, order );
 
-                //vector<size_t> order; order.reserve( H->order() );
+                //vector<size_t> order; order.reserve( H->orderless () );
                 //MultiOpt::topologicalOrderQueue( H, rootInd, order );
 
                 MultiOpt::slnDictT slnDict;
@@ -453,9 +460,18 @@ int main( int argc, char **argv ) {
 
             } else if ( method == "pars" ) { // Using parsimony algo.
 
-                auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, creationCost, 
-                                                            deletionCost, penalty, 
-                                                            directed, MultiOpt::DerivationType::AllHistories );
+                string costModelFile = ap["parsimonyCosts"].as<string>();
+                ParsimonyCosts pc(costModelFile);
+                if (pc.isDirected() != directed) {
+                    std::cerr << "The provided set of costs [" << costModelFile << "] is " <<
+                    "for a " << (pc.isDirected() ? "directed" : "undirected") << 
+                    " network, but the -u (undirected) flag " << (directed ? "was not" : "was") <<
+                    " passed on the command line.\n";
+                    std::exit(1);
+                }
+
+                auto H = MultiOpt::buildSolutionSpaceGraph( tree, tinfo, pc, penalty, 
+                                                            MultiOpt::DerivationType::AllHistories );
 
                 auto rootKey = FlipKey( tree->getRootId(), tree->getRootId(), false, false, true, true );
                 auto rootInd = H->index(rootKey);
@@ -600,9 +616,9 @@ int main( int argc, char **argv ) {
                     MultiOpt::slnDictT slnDict;
                     slnDict.resize(order.size());
                     if ( undirected ) {
-                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), pc, slnDict);
                     } else {
-                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), pc, slnDict);
                     }
                     // DONE LEAF COST DICT
 
@@ -721,9 +737,9 @@ int main( int argc, char **argv ) {
                     MultiOpt::slnDictT slnDict;
                     slnDict.resize(order.size());
                     if ( undirected ) {
-                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), pc, slnDict);
                     } else {
-                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), pc, slnDict);
                     }
                     // DONE LEAF COST DICT
 
@@ -756,9 +772,9 @@ int main( int argc, char **argv ) {
                     MultiOpt::slnDictT slnDict;
                     slnDict.resize(order.size());
                     if ( undirected ) {
-                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<undirectedGraphT>(G), pc, slnDict);
                     } else {
-                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), directed, creationCost, deletionCost, slnDict);
+                        MultiOpt::leafCostDict( H, tree, tinfo, get<directedGraphT>(G), pc, slnDict);
                     }
 
                     performReconstruction( outputName, slnDict );

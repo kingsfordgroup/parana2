@@ -82,6 +82,7 @@ namespace std {
 }
 
 class Model;
+class ParsimonyCosts;
 class CountedDerivation;
 
 namespace MultiOpt {
@@ -265,15 +266,13 @@ namespace MultiOpt {
 
     unique_ptr<ForwardHypergraph>  buildSolutionSpaceGraph( const TreePtrT& t,
                                                             const TreeInfo& ti,
-                                                            double cc,
-                                                            double dc,
+                                                            const ParsimonyCosts& pc,
                                                             double penalty,
-                                                            bool directed,
                                                             DerivationType dtype);
 
 
     template< typename GT >
-    void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, TreeInfo& ti, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );
+    void leafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, TreeInfo& ti, GT& G, const ParsimonyCosts& pc, slnDictT& slnDict );
 
     template< typename GT >
     void MLLeafCostDict( unique_ptr<ForwardHypergraph>& H, TreePtrT& T, TreeInfo& ti, GT& G, bool directed, double cc, double dc, slnDictT& slnDict );

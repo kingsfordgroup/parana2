@@ -141,11 +141,15 @@ namespace Utils {
 
         bool sameSpecies(const TreePtrT& t, int u, int v);
 
+        bool isSpeciationEvent(const FlipKey& k, const TreeInfo& ti);
+
+        std::tuple<int, int, int, int> correspondingSpecies(const FlipKey& k, const TreeInfo& ti);
+
         bool isDescendantSpecies(const TreeInfo& ti, int u, int v);
 
         TreePtrT readNewickTree( const std::string& treeName );
 
-        const std::string getName( TreePtrT& t, int nid);
+        const std::string getName( const TreePtrT& t, int nid);
 
         string getExtantNetwork(const string& s);
 
