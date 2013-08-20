@@ -155,7 +155,7 @@ int main( int argc, char **argv ) {
     ("target,t", po::value< string >(), "extant graph file")
     ("undir,u", po::value< bool >()->zero_tokens() , "graph is undirected")
     ("output,o", po::value< string >()->default_value("edgeProbs.txt"), "output file containing edge probabilities")
-    ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 newick format trees ]")
+    ("dupHist,d", po::value< vector<string> >(), "duplication history input file(s) [ either 1 or 2 phyloxml format trees ]")
     ;
 
     // Those options only relevant to the parsimony method
