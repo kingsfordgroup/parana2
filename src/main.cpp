@@ -161,15 +161,15 @@ int main( int argc, char **argv ) {
     // Those options only relevant to the parsimony method
     po::options_description parsimony("Parsimony Specific Options");
     parsimony.add_options()
-    ("del", po::value< double >()->default_value(1.0), "deletion cost")
-    ("ratio,r", po::value< double >()->default_value(1.2), "ratio of creation to deletion cost")
+    //("del", po::value< double >()->default_value(1.0), "deletion cost")
+    //("ratio,r", po::value< double >()->default_value(1.2), "ratio of creation to deletion cost")
     ("beta,b", po::value< double >()->default_value(60.0), "scale factor for cost classes")
     ("parsimonyCosts,m", po::value< string >()->default_value(""), "file containing costs for different events")
     ("numOpt,k", po::value< size_t>()->default_value(40), "number of near-optimal score classes to use")
-    ("timePenalty,p", po::value< double >()->default_value(1.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
+    ("timePenalty,p", po::value< double >()->default_value(0.0), "amount to penalize flips between nodes whose time intervals don't overlap'")
     ("single,s", po::value<bool>()->zero_tokens(), "compute a single optimal set of flips (i.e. \"Parana 1\")")
-    ("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm (deprecated)")
-    ("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm (not yet implemented)")
+    //("old,x", po::value< bool >()->zero_tokens(), "run using \"old\" algorithm (deprecated)")
+    //("lazy,l", po::value< bool >()->zero_tokens(), "run using the \"lazy\" algorithm (not yet implemented)")
     ;
 
     // Those options only relevant to the probabilistic method
@@ -218,8 +218,8 @@ int main( int argc, char **argv ) {
 
         double penalty = ap["timePenalty"].as<double>();
         
-        double deletionCost = ap["del"].as<double>();
-        double creationCost = ap["ratio"].as<double>() * deletionCost;
+        double deletionCost = 1.0;//ap["del"].as<double>();
+        double creationCost = 1.0;//ap["ratio"].as<double>() * deletionCost;
         
        
         size_t k = ap["numOpt"].as<size_t>();

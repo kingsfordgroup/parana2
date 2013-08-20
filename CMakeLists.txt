@@ -32,7 +32,7 @@ SET( CMAKE_CXX_FLAGS "-g -O3 -DBOOST_HAS_HASH -DHAVE_ANSI_TERM -DNDEBUG -arch x8
 # When Clang is ready
 #SET( CMAKE_CXX_FLAGS "-O3 -g -std=c++11 -stdlib=libstdc++ ${CMAKE_CXX_FLAGS}")
 
-FIND_PACKAGE( Boost 1.54 COMPONENTS regex program_options filesystem timer system )
+FIND_PACKAGE( Boost 1.54 COMPONENTS regex program_options filesystem timer chrono system regex)
 
 SET( PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR} )
 SET( CMAKE_INSTALL_PREFIX "." )

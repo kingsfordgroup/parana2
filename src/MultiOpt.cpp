@@ -2871,7 +2871,7 @@ vector<CostClassT> computeKBest(const size_t &vid,
     };
 
     // Exact score classes
-    double epsilon = 0.2;//0.1;
+    double epsilon = 0.15;//0.1;
 
     // While there are still derivations left in the heap,
     // and we don't yet have the required number of solutions
