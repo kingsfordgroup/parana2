@@ -37,6 +37,7 @@ FIND_PACKAGE( Boost 1.54 COMPONENTS regex program_options filesystem timer chron
 SET( PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR} )
 SET( CMAKE_INSTALL_PREFIX "." )
 SET( EXECUTABLE_OUTPUT_PATH ${PROJECT_ROOT}/build/bin )
+SET( EXTERNAL_INSTALL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/install)
 
 ## Look for GMP ##
 FIND_PACKAGE (GMP)
@@ -46,6 +47,7 @@ IF (GMP_FOUND)
 ELSE()
   SET (FETCH_GMP TRUE)
   MESSAGE ("-- couldn't find GMP; fetching from internet")
+  SET(GMP_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libgmp.${SHARED_LIB_EXT})
 ENDIF()
 
 ## Look for MPFR ##
@@ -56,6 +58,7 @@ IF (MPFR_FOUND)
 ELSE()
   SET (FETCH_MPFR TRUE)
   MESSAGE ("-- couldn't find MPFR; fetching from internet")
+  SET(MPFR_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libmpfr.${SHARED_LIB_EXT})  
 ENDIF()
 
 ## Look for CLN ##
@@ -66,12 +69,12 @@ IF (CLN_FOUND)
 ELSE()
   SET (FETCH_CLN TRUE)
   MESSAGE ("-- couldn't find CLN; fetching from internet")
+  SET(CLN_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libcln.${SHARED_LIB_EXT})    
 ENDIF()
 
 ## Look for PUGIXML ##
 FIND_LIBRARY ( PUGIXML_LIBRARY NAMES pugixml HINTS ${LINK_DIRECTORIES})
 FIND_PATH ( PUGIXML_INCLUDE_DIR pugixml.hpp HINTS ${INCLUDE_DIRECTORIES} PATH_SUFFIXES pugixml )
-
 
 ## Look for Bio++ ##
 
@@ -87,6 +90,9 @@ IF (BPP_CORE_LIBRARY-NOTFOUND OR BPP_CORE_INCLUDE_DIR-NOTFOUND OR
     BPP_SEQ_LIBRARY-NOTFOUND OR BPP_SEQ_INCLUDE_DIR-NOTFOUND   )
   MESSAGE ("-- couldn't find Bio++; fetching from the internet")
   SET (FETCH_BPP TRUE)
+  SET(BPP_CORE_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libbpp-core.${SHARED_LIB_EXT})
+  SET(BPP_PHYL_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libbpp-phyl.${SHARED_LIB_EXT})
+  SET(BPP_SEQ_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libbpp-seq.${SHARED_LIB_EXT})  
 ELSE()
   MESSAGE ("-- found Bio++.")
 ENDIF()
@@ -101,6 +107,7 @@ INCLUDE (ExternalProject)
 IF (PUGIXML_LIBRARY-NOTFOUND OR PUGIXML_INCLUDE_DIR-NOTFOUND )
   MESSAGE("-- Did not find pugixml library and heades")
   SET(FETCH_PUGIXML TRUE)
+  SET(PUGIXML_LIBRARY ${EXTERNAL_INSTALL_DIR}/lib/libpugixml.a)  
 ELSE()
   MESSAGE("-- Found pugiXML library and headers (lib = ${PUGIXML_LIBRARY})")
 ENDIF()
